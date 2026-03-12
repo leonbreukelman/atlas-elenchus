@@ -1,0 +1,20 @@
+[project]
+name = "atlas-elenchus"
+version = "0.1.0"
+description = "Autoresearch trading agents with Elenchus probe layer"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+    "yfinance>=0.2.36",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "tabulate>=0.9",
+    "python-dotenv>=1.0",
+    "gitpython>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.ruff]
+line-length = 100

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+dist/
+build/
+.venv/
+prompts/agents_vanilla/
+prompts/agents_elenchus/
+results/*.csv
+results/*.png
+uv.lock
