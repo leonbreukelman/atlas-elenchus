@@ -96,7 +96,9 @@ class Portfolio:
         pos_weight = 1.0 / len(top)
         self.positions = []
         for _, rec, deutsch in top:
-            price = snapshot.prices["Close"].iloc[-1].get(rec.ticker, 0) if hasattr(snapshot.prices["Close"].iloc[-1], 'get') else 0
+            # snapshot.prices is already Close prices (tickers as columns)
+            last_prices = snapshot.prices.iloc[-1]
+            price = last_prices.get(rec.ticker, 0) if hasattr(last_prices, 'get') else 0
             self.positions.append(Position(
                 ticker=rec.ticker,
                 direction=rec.direction,

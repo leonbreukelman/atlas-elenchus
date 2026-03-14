@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Autoresearch trading agents with Elenchus probe layer"
 requires-python = ">=3.10"
 dependencies = [
-    "anthropic>=0.40.0",
+    "litellm>=1.40",
     "yfinance>=0.2.36",
     "pandas>=2.0",
     "numpy>=1.24",

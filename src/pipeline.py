@@ -10,7 +10,6 @@ Each layer feeds into the next. Elenchus probes every recommendation
 before it passes upstream.
 """
 
-import anthropic
 from pathlib import Path
 
 from .agent import Agent, Recommendation
@@ -43,14 +42,12 @@ class Pipeline:
     def __init__(
         self,
         prompt_dir: Path,
-        client: anthropic.Anthropic,
         use_elenchus: bool = False,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "openrouter/qwen/qwen3-235b-a22b",
     ):
-        self.client = client
         self.use_elenchus = use_elenchus
         self.model = model
-        self.probe = ElenchusProbe(client, model) if use_elenchus else None
+        self.probe = ElenchusProbe(model) if use_elenchus else None
 
         # Initialize agents
         self.agents: dict[str, Agent] = {}
@@ -86,7 +83,6 @@ class Pipeline:
             for agent in layer_agents:
                 try:
                     recs = agent.recommend(
-                        client=self.client,
                         snapshot=snapshot,
                         upstream_signals=upstream if upstream else None,
                         model=self.model,

@@ -213,13 +213,35 @@ Every `--mutation-interval` trading days (default: 20):
 
 ---
 
+## Initial A/B Results
+
+19-day backtest, Dec 16 2024 -- Jan 14 2025. Model: Qwen3-235B via OpenRouter.
+
+| Metric | Vanilla | Elenchus |
+|---|---|---|
+| Cumulative Return | +13.65% | +15.05% |
+| Annualized Sharpe | 7.718 | 4.619 |
+| Max Drawdown | -1.61% | -8.47% |
+| Win Rate | 73.7% | 73.7% |
+| Daily Volatility | 1.45% | 2.74% |
+
+Key findings:
+
+- The Deutsch Probe produces a genuinely different portfolio (0.107 correlation with vanilla)
+- 31% of filtered recommendations scored 0.00 -- completely decorative reasoning
+- The filter is currently too aggressive (threshold 0.6), leaving ~3.3 recommendations/day and creating concentration risk
+- Outperformance is fragile -- concentrated in a single day
+- The mechanism works; calibration needs refinement
+
+---
+
 ## Prerequisites
 
 - **Python 3.10+**
-- **[uv](https://docs.astral.sh/uv/)** — Python project manager
-- **Anthropic API key** — agents use Claude Sonnet via the Anthropic API
-- **Git** — autoresearch uses git branches for keep/discard checkpointing
-- **Internet access** — yfinance downloads historical market data
+- **[uv](https://docs.astral.sh/uv/)** -- Python project manager
+- **An LLM API key** -- any provider supported by [litellm](https://docs.litellm.ai/) (OpenRouter, Anthropic, local via Ollama, etc.)
+- **Git** -- autoresearch uses git branches for keep/discard checkpointing
+- **Internet access** -- yfinance downloads historical market data
 
 No GPU required. This runs on any machine with API access.
 
@@ -240,7 +262,7 @@ uv sync
 
 # Create environment configuration
 cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
+# Edit .env and add your API key (OPENROUTER_API_KEY or ANTHROPIC_API_KEY)
 
 # Initialize git repository (required for autoresearch keep/discard)
 git init
@@ -255,7 +277,11 @@ git commit -m "initial"
 ### Environment variables (`.env`)
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...    # Required
+# Which key you need depends on model choice:
+#   openrouter/* models → OPENROUTER_API_KEY
+#   anthropic/* models  → ANTHROPIC_API_KEY
+OPENROUTER_API_KEY=sk-or-v1-...
+ANTHROPIC_API_KEY=sk-ant-...
 FMP_API_KEY=                     # Optional: for fundamental data
 BRANCH_PREFIX=autoresearch       # Git branch prefix
 MODE=ab                          # Default run mode
@@ -279,7 +305,7 @@ MODE=ab                          # Default run mode
 ### Full A/B comparison (recommended first run)
 
 ```bash
-uv run python -m scripts.run --mode ab --start 2024-09-01 --end 2025-09-01
+uv run python -m scripts.run --mode ab --start 2024-09-01 --model openrouter/qwen/qwen3-235b-a22b
 ```
 
 This runs both branches sequentially over the same date range. Takes several hours depending on the number of trading days. Watch the terminal for progress updates every 20 days.
@@ -288,19 +314,19 @@ This runs both branches sequentially over the same date range. Takes several hou
 
 ```bash
 # Vanilla only (no Elenchus probe)
-uv run python -m scripts.run --mode vanilla --start 2024-09-01
+uv run python -m scripts.run --mode vanilla --start 2024-09-01 --model openrouter/qwen/qwen3-235b-a22b
 
 # Elenchus only
-uv run python -m scripts.run --mode elenchus --start 2024-09-01
+uv run python -m scripts.run --mode elenchus --start 2024-09-01 --model openrouter/qwen/qwen3-235b-a22b
 ```
 
 ### Development / cheap iteration
 
-Use Haiku for lower cost during development:
+Use a smaller or cheaper model during development:
 
 ```bash
 uv run python -m scripts.run --mode elenchus --start 2025-01-01 --end 2025-03-01 \
-    --model claude-haiku-4-5-20251001
+    --model openrouter/deepseek/deepseek-chat-v3
 ```
 
 ### Short test run
@@ -309,6 +335,18 @@ uv run python -m scripts.run --mode elenchus --start 2025-01-01 --end 2025-03-01
 uv run python -m scripts.run --mode elenchus --start 2025-06-01 --end 2025-07-01 \
     --mutation-interval 5
 ```
+
+---
+
+## Model Support
+
+Uses [litellm](https://docs.litellm.ai/) -- any model supported by litellm works. Examples:
+
+- **OpenRouter:** `openrouter/qwen/qwen3-235b-a22b`, `openrouter/deepseek/deepseek-chat-v3`
+- **Anthropic:** `anthropic/claude-sonnet-4-20250514`
+- **Local (Ollama):** `ollama/qwen3:32b`
+
+Set the appropriate API key in `.env` for your chosen provider.
 
 ---
 
@@ -430,10 +468,12 @@ atlas-elenchus/
 │       └── cio.md
 │
 ├── scripts/
-│   └── run.py                # Main entry point
+│   ├── run.py                # Main entry point
+│   └── run_monitored.sh      # Wrapper script with logging
 │
 ├── src/
 │   ├── __init__.py
+│   ├── llm.py                # litellm wrapper for multi-provider support
 │   ├── market_data.py        # yfinance data provider, MarketSnapshot iterator
 │   ├── agent.py              # Agent class, Recommendation dataclass
 │   ├── elenchus.py           # Deutsch Probe implementation
@@ -448,7 +488,9 @@ atlas-elenchus/
 
 **`src/market_data.py`** — Downloads historical OHLCV data from yfinance for a configurable stock universe. Provides a `MarketSnapshot` iterator that yields one day at a time with no future data leakage. Each snapshot includes trailing returns (1d, 5d, 20d), realized volatility, and a simple regime classification (risk-on / risk-off / neutral).
 
-**`src/agent.py`** — Defines the `Agent` class. Each agent wraps an Anthropic API call with a system prompt loaded from a `.md` file. The response contract requires JSON with `reasoning_components` — a list of 3-5 independent, falsifiable claims. Also handles Darwinian weight bounds (0.3–2.5) and weight adjustment.
+**`src/llm.py`** — litellm wrapper providing multi-provider LLM support (OpenRouter, Anthropic, Ollama, etc.).
+
+**`src/agent.py`** — Defines the `Agent` class. Each agent wraps an LLM call (via litellm) with a system prompt loaded from a `.md` file. The response contract requires JSON with `reasoning_components` — a list of 3-5 independent, falsifiable claims. Also handles Darwinian weight bounds (0.3-2.5) and weight adjustment.
 
 **`src/elenchus.py`** — The Deutsch Probe. For each recommendation's reasoning components: (1) a perturbation agent generates a plausible alternative for one component, (2) a judge agent evaluates whether the conclusion survives the swap. Produces a `deutsch_score` (ratio of load-bearing components). Threshold of 0.6 classifies as "hard to vary."
 
@@ -491,41 +533,34 @@ Extend `MarketSnapshot` in `src/market_data.py` and update `Agent._build_context
 
 ### Using a different model for probes vs agents
 
-In `src/pipeline.py`, the `Pipeline` constructor passes the same model to both the agent calls and the Elenchus probe. To separate them:
+In `src/pipeline.py`, the `Pipeline` constructor passes the same model to both the agent calls and the Elenchus probe. To separate them, pass a cheaper model for the probe:
 
 ```python
-self.probe = ElenchusProbe(client, model="claude-haiku-4-5-20251001")  # cheaper probe
+self.probe = ElenchusProbe(model="openrouter/deepseek/deepseek-chat-v3")  # cheaper probe
 ```
 
 ---
 
 ## Cost Estimates
 
-All costs assume Claude Sonnet pricing. Estimates are approximate.
+Costs vary significantly by model. Estimates below are per 250 trading days (approximate).
 
-**Per trading day — Vanilla branch:**
-- 8 agents × ~2,000 output tokens each = ~16,000 tokens
-- Estimated cost: ~$0.50–1.00/day
+**Token volume per trading day:**
+- Vanilla: 8 agents x ~2,000 output tokens = ~16,000 tokens
+- Elenchus: same + ~4 components/rec x ~10 recs x 2 LLM calls x ~500 tokens = ~56,000 tokens
+- Autoresearch mutation (every 20 days): ~3,000 tokens (negligible)
 
-**Per trading day — Elenchus branch:**
-- 8 agents × ~2,000 output tokens = ~16,000 tokens (same as vanilla)
-- Elenchus probes: ~4 components/recommendation × ~10 recommendations × 2 LLM calls × ~500 tokens = ~40,000 tokens
-- Estimated cost: ~$2–4/day
+**Full backtest cost estimates (250 trading days, A/B mode):**
 
-**Per autoresearch mutation (every 20 days):**
-- ~3,000 tokens for the mutator call
-- Negligible relative to daily agent costs
-
-**Full backtest estimates (250 trading days):**
-
-| Mode | Estimated Cost |
-|------|---------------|
-| Vanilla | $125–250 |
-| Elenchus | $500–1,000 |
-| A/B (both) | $625–1,250 |
+| Model | Vanilla | Elenchus | A/B (both) |
+|---|---|---|---|
+| `openrouter/qwen/qwen3-235b-a22b` | ~$15–30 | ~$50–100 | ~$65–130 |
+| `openrouter/deepseek/deepseek-chat-v3` | ~$10–20 | ~$35–70 | ~$45–90 |
+| `anthropic/claude-sonnet-4-20250514` | ~$125–250 | ~$500–1,000 | ~$625–1,250 |
+| `ollama/qwen3:32b` (local) | Free | Free | Free |
 
 **Cost reduction strategies:**
-- Use `--model claude-haiku-4-5-20251001` during development (roughly 10x cheaper)
+- Use a cheap model (OpenRouter Qwen/DeepSeek, or local Ollama) during development
 - Reduce `--mutation-interval` to get faster feedback on fewer days
 - Shorten the date range for initial validation before running full backtest
 
@@ -533,10 +568,14 @@ All costs assume Claude Sonnet pricing. Estimates are approximate.
 
 ## Known Limitations
 
+### Statistical limitations
+- The 19-day initial test period is too short for statistical significance. Results are directional, not conclusive.
+
 ### Data limitations
 - Agents see only OHLCV price data from yfinance. No fundamentals, earnings, news, order flow, or analyst estimates. Real trading systems have much richer information.
-- yfinance may have survivorship bias — delisted or acquired companies may not appear correctly in historical data.
+- Survivorship bias in the ticker universe -- delisted or acquired companies may not appear correctly in historical data.
 - No transaction costs, slippage, or market impact modeled. Real returns would be lower.
+- Look-ahead bias in regime classification.
 
 ### Experimental design limitations
 - **Self-evaluation bias:** The Elenchus probe uses the same model family (Claude) as the agents whose reasoning it evaluates. The probe may be systematically lenient toward reasoning patterns that Claude tends to produce. This doesn't invalidate the A/B comparison (the bias is constant across both branches) but limits generalizability claims.
@@ -546,7 +585,7 @@ All costs assume Claude Sonnet pricing. Estimates are approximate.
 ### Elenchus-specific limitations
 - The perturbation agent may not generate sufficiently adversarial replacements. If replacements are too similar to the original, the probe underestimates how many components are decorative.
 - The judge agent may have difficulty with nuanced logical dependencies, especially in multi-factor arguments where components interact.
-- The 0.6 threshold for "hard to vary" is arbitrary. The optimal threshold is an empirical question this experiment can help answer.
+- The 0.6 threshold for "hard to vary" is arbitrary and, based on initial results, too aggressive -- it leaves ~3.3 recommendations/day, creating concentration risk. The optimal threshold is an empirical question this experiment can help answer.
 
 ### Infrastructure limitations
 - The backtest runs sequentially (one day at a time, one branch at a time). For long date ranges, this takes hours. Parallelization across days is possible but not implemented.

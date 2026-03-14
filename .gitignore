@@ -7,6 +7,7 @@ build/
 .venv/
 prompts/agents_vanilla/
 prompts/agents_elenchus/
-results/*.csv
+results/*.log
 results/*.png
+results/backtest_status.json
 uv.lock

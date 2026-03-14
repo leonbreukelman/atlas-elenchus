@@ -18,10 +18,10 @@ swapped out and the conclusion wouldn't change — pure post-hoc rationalization
 """
 
 import json
-import anthropic
 from dataclasses import dataclass
 
 from .agent import Recommendation
+from .llm import completion_with_retry
 
 
 @dataclass
@@ -97,10 +97,8 @@ class ElenchusProbe:
 
     def __init__(
         self,
-        client: anthropic.Anthropic,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "openrouter/qwen/qwen3-235b-a22b",
     ):
-        self.client = client
         self.model = model
 
     def probe(self, rec: Recommendation) -> ElenchusResult:
@@ -151,23 +149,45 @@ class ElenchusProbe:
             f"Reasoning component to replace:\n{component}"
         )
 
-        response = self.client.messages.create(
+        response = completion_with_retry(
             model=self.model,
             max_tokens=300,
-            system=PERTURBATION_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": context}],
+            messages=[
+                {"role": "system", "content": PERTURBATION_SYSTEM_PROMPT},
+                {"role": "user", "content": context},
+            ],
         )
 
         try:
-            raw = response.content[0].text.strip()
+            raw = response.choices[0].message.content.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1]
             if raw.endswith("```"):
                 raw = raw.rsplit("```", 1)[0]
             data = json.loads(raw.strip())
-            return data.get("replacement", component)
-        except (json.JSONDecodeError, KeyError):
-            return f"[REPLACEMENT FAILED] {component}"
+
+            # Defensive parsing — Qwen sometimes returns a list instead of a dict
+            if isinstance(data, list):
+                # Take first element if it's a dict, otherwise fall back
+                data = data[0] if data and isinstance(data[0], dict) else {}
+            if isinstance(data, dict):
+                replacement = data.get("replacement", component)
+                # The value itself might not be a string
+                if isinstance(replacement, str):
+                    return replacement
+                elif isinstance(replacement, list):
+                    # List of strings — join them
+                    return " ".join(str(r) for r in replacement) if replacement else component
+                else:
+                    return str(replacement) if replacement else component
+            elif isinstance(data, str):
+                # Bare string response — use directly as replacement
+                return data if data.strip() else component
+            else:
+                return component
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError):
+            # Any parse failure — return original component as fallback, never crash
+            return component
 
     def _test_swap(
         self,
@@ -195,29 +215,50 @@ class ElenchusProbe:
             f"from the MODIFIED reasoning?"
         )
 
-        response = self.client.messages.create(
+        response = completion_with_retry(
             model=self.model,
             max_tokens=500,
-            system=PROBE_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": context}],
+            messages=[
+                {"role": "system", "content": PROBE_SYSTEM_PROMPT},
+                {"role": "user", "content": context},
+            ],
         )
 
         try:
-            raw = response.content[0].text.strip()
+            raw = response.choices[0].message.content.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1]
             if raw.endswith("```"):
                 raw = raw.rsplit("```", 1)[0]
             data = json.loads(raw.strip())
+
+            # Defensive parsing — Qwen sometimes returns a list instead of a dict
+            if isinstance(data, list):
+                data = data[0] if data and isinstance(data[0], dict) else {}
+            if not isinstance(data, dict):
+                # Non-dict, non-list — treat as parse failure
+                raise ValueError(f"Unexpected JSON shape: {type(data).__name__}")
+
+            # Extract fields with type safety
+            conclusion_raw = data.get("conclusion_survives", True)
+            if isinstance(conclusion_raw, str):
+                conclusion_survived = conclusion_raw.lower().strip() in ("true", "yes", "1")
+            else:
+                conclusion_survived = bool(conclusion_raw)
+
+            explanation_raw = data.get("explanation", "")
+            probe_reasoning = str(explanation_raw) if explanation_raw else ""
+
             return ProbeResult(
                 component_index=swap_index,
                 original_component=original,
                 replacement_component=replacement,
-                conclusion_survived=bool(data.get("conclusion_survives", True)),
-                probe_reasoning=data.get("explanation", ""),
+                conclusion_survived=conclusion_survived,
+                probe_reasoning=probe_reasoning,
             )
-        except (json.JSONDecodeError, KeyError):
-            # Parse failure — assume component is decorative (conservative)
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError,
+                AttributeError, ValueError):
+            # Any parse failure — conservative assumption: treat as decorative
             return ProbeResult(
                 component_index=swap_index,
                 original_component=original,

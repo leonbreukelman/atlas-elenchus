@@ -9,11 +9,11 @@ Sharpe is the loss function, git is the checkpoint mechanism.
 
 import json
 import subprocess
-import anthropic
 from pathlib import Path
 from dataclasses import dataclass
 
 from .agent import Agent
+from .llm import completion_with_retry
 
 
 @dataclass
@@ -66,12 +66,10 @@ class AutoresearchLoop:
 
     def __init__(
         self,
-        client: anthropic.Anthropic,
         repo_dir: Path,
         eval_window: int = 5,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "openrouter/qwen/qwen3-235b-a22b",
     ):
-        self.client = client
         self.repo_dir = repo_dir
         self.eval_window = eval_window
         self.model = model
@@ -93,21 +91,38 @@ class AutoresearchLoop:
         )
 
         try:
-            response = self.client.messages.create(
+            response = completion_with_retry(
                 model=self.model,
                 max_tokens=3000,
-                system=MUTATOR_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": context}],
+                messages=[
+                    {"role": "system", "content": MUTATOR_SYSTEM_PROMPT},
+                    {"role": "user", "content": context},
+                ],
             )
 
-            raw = response.content[0].text.strip()
+            raw = response.choices[0].message.content.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1]
             if raw.endswith("```"):
                 raw = raw.rsplit("```", 1)[0]
 
             data = json.loads(raw.strip())
-            return data.get("modified_prompt")
+
+            # Defensive parsing — Qwen sometimes returns a list instead of a dict
+            if isinstance(data, list):
+                data = data[0] if data and isinstance(data[0], dict) else {}
+            if isinstance(data, dict):
+                result = data.get("modified_prompt")
+                if isinstance(result, str) and result.strip():
+                    return result
+                elif isinstance(result, list):
+                    # List of strings — join them
+                    return "\n".join(str(r) for r in result) if result else None
+                return None
+            elif isinstance(data, str) and data.strip():
+                # Bare string response — might be the prompt itself
+                return data
+            return None
         except Exception as e:
             print(f"  Mutation generation failed: {e}")
             return None

@@ -23,7 +23,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-import anthropic
+import litellm
+litellm.suppress_debug_info = True
 import pandas as pd
 from dotenv import load_dotenv
 from tabulate import tabulate
@@ -34,14 +35,56 @@ from src.portfolio import Portfolio, score_agents
 from src.autoresearch import AutoresearchLoop
 
 
+def _checkpoint_path(output_dir: Path, mode: str) -> Path:
+    """Path for the checkpoint file."""
+    return output_dir / f"{mode}_checkpoint.json"
+
+
+def _save_checkpoint(
+    checkpoint_path: Path,
+    mode: str,
+    daily_log: list[dict],
+    agent_weights: dict[str, dict],
+    mutation_log: list[dict],
+    elenchus_log: list[dict],
+    cumulative: float,
+) -> None:
+    """Save backtest state so we can resume after a crash."""
+    data = {
+        "mode": mode,
+        "daily_returns": daily_log,
+        "agent_weights": agent_weights,
+        "mutation_log": mutation_log,
+        "elenchus_log": elenchus_log,
+        "cumulative": cumulative,
+    }
+    # Write to temp file then rename for atomicity
+    tmp = checkpoint_path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.rename(checkpoint_path)
+
+
+def _load_checkpoint(checkpoint_path: Path) -> dict | None:
+    """Load checkpoint if it exists. Returns None if no checkpoint."""
+    if not checkpoint_path.exists():
+        return None
+    try:
+        data = json.loads(checkpoint_path.read_text())
+        print(f"  Checkpoint found: {len(data.get('daily_returns', []))} days completed")
+        return data
+    except (json.JSONDecodeError, KeyError) as e:
+        print(f"  Checkpoint corrupted, starting fresh: {e}")
+        return None
+
+
 def run_backtest(
     mode: str,
-    client: anthropic.Anthropic,
     market: MarketData,
     prompt_dir: Path,
     repo_dir: Path,
     mutation_interval: int = 20,
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "openrouter/qwen/qwen3-235b-a22b",
+    output_dir: Path | None = None,
 ) -> dict:
     """
     Run a single backtest.
@@ -49,25 +92,69 @@ def run_backtest(
     mutation_interval: run autoresearch mutation every N trading days
     """
     use_elenchus = mode == "elenchus"
-    pipeline = Pipeline(prompt_dir, client, use_elenchus=use_elenchus, model=model)
+    pipeline = Pipeline(prompt_dir, use_elenchus=use_elenchus, model=model)
     portfolio = Portfolio(use_elenchus=use_elenchus)
-    autoresearch = AutoresearchLoop(client, repo_dir, model=model)
+    autoresearch = AutoresearchLoop(repo_dir, model=model)
+
+    # Resolve output dir for checkpoints
+    if output_dir is None:
+        output_dir = repo_dir / "results"
+    output_dir.mkdir(exist_ok=True)
+    checkpoint_path = _checkpoint_path(output_dir, mode)
 
     day_count = 0
     recommendations_by_agent: dict[str, list] = {}
     mutation_log: list[dict] = []
     elenchus_log: list[dict] = []
 
+    # Check for existing checkpoint to resume from
+    completed_dates: set[str] = set()
+    checkpoint = _load_checkpoint(checkpoint_path)
+    if checkpoint:
+        # Restore agent weights from checkpoint
+        saved_weights = checkpoint.get("agent_weights", {})
+        for agent_id, weight_info in saved_weights.items():
+            if agent_id in pipeline.agents:
+                pipeline.agents[agent_id].darwinian_weight = weight_info["weight"]
+                pipeline.agents[agent_id].rolling_sharpe = weight_info["sharpe"]
+
+        # Restore portfolio state from checkpoint daily returns
+        for entry in checkpoint.get("daily_returns", []):
+            completed_dates.add(entry["date"])
+            portfolio.daily_returns.append(entry["return"])
+            portfolio.cumulative = 1.0 + entry["cumulative"]
+            from src.portfolio import DailyPnL
+            portfolio.daily_log.append(DailyPnL(
+                date=entry["date"],
+                portfolio_return=entry["return"],
+                cumulative_return=entry["cumulative"],
+                positions=[],
+            ))
+
+        mutation_log = checkpoint.get("mutation_log", [])
+        elenchus_log = checkpoint.get("elenchus_log", [])
+        day_count = len(completed_dates)
+        print(f"  Resuming from day {day_count + 1} (skipping {len(completed_dates)} completed days)")
+
     print(f"\n{'='*60}")
     print(f"  BACKTEST: {mode.upper()}")
     print(f"{'='*60}")
 
+    import time as _time
     for snapshot in market.iterate():
-        day_count += 1
         date_str = snapshot.date.strftime("%Y-%m-%d")
 
+        # Skip days already completed in checkpoint
+        if date_str in completed_dates:
+            continue
+
+        day_count += 1
+
         # Run pipeline
+        _day_start = _time.time()
         recommendations, elenchus_results = pipeline.run_day(snapshot)
+        _day_elapsed = _time.time() - _day_start
+        print(f"  Day {day_count} ({date_str}): {len(recommendations)} recs in {_day_elapsed:.0f}s")
 
         # Log elenchus results
         if elenchus_results:
@@ -130,6 +217,29 @@ def run_backtest(
             for agent in sorted(pipeline.agents.values(), key=lambda a: a.darwinian_weight, reverse=True):
                 print(f"    {agent.agent_id:20s}  w={agent.darwinian_weight:.3f}  sharpe={agent.rolling_sharpe:.3f}")
 
+        # Save checkpoint after each completed day
+        daily_log = [
+            {"date": d.date, "return": d.portfolio_return, "cumulative": d.cumulative_return}
+            for d in portfolio.daily_log
+        ]
+        current_agent_weights = {
+            a.agent_id: {"weight": a.darwinian_weight, "sharpe": a.rolling_sharpe}
+            for a in pipeline.agents.values()
+        }
+        _save_checkpoint(
+            checkpoint_path, mode, daily_log,
+            current_agent_weights, mutation_log, elenchus_log,
+            portfolio.cumulative,
+        )
+
+    # Backtest complete — remove checkpoint, save final results
+    final_results_path = output_dir / f"{mode}_returns.csv"
+    daily_df = portfolio.to_dataframe()
+    daily_df.to_csv(final_results_path, index=False)
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
+        print(f"  Checkpoint removed (backtest complete)")
+
     # Final results
     results = {
         "mode": mode,
@@ -137,7 +247,7 @@ def run_backtest(
         "final_sharpe": portfolio.sharpe,
         "cumulative_return": portfolio.cumulative - 1.0,
         "mutations": len(mutation_log),
-        "daily_returns": portfolio.to_dataframe(),
+        "daily_returns": daily_df,
         "agent_weights": {
             a.agent_id: {"weight": a.darwinian_weight, "sharpe": a.rolling_sharpe}
             for a in pipeline.agents.values()
@@ -158,16 +268,23 @@ def main():
     parser.add_argument("--end", default=None)
     parser.add_argument("--mutation-interval", type=int, default=20,
                         help="Run autoresearch mutation every N trading days")
-    parser.add_argument("--model", default="claude-sonnet-4-20250514")
+    parser.add_argument("--model", default="openrouter/qwen/qwen3-235b-a22b")
     parser.add_argument("--output-dir", default="results")
     args = parser.parse_args()
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("ERROR: Set ANTHROPIC_API_KEY in .env")
+    # litellm reads API keys from environment automatically:
+    #   OPENROUTER_API_KEY for openrouter/* models
+    #   ANTHROPIC_API_KEY for anthropic/* models
+    model_prefix = args.model.split("/")[0] if "/" in args.model else ""
+    key_map = {
+        "openrouter": "OPENROUTER_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+    }
+    required_key = key_map.get(model_prefix)
+    if required_key and not os.environ.get(required_key):
+        print(f"ERROR: Set {required_key} in .env for model {args.model}")
         return
 
-    client = anthropic.Anthropic(api_key=api_key)
     repo_dir = Path(__file__).parent.parent
     prompt_dir = repo_dir / "prompts" / "agents"
     output_dir = repo_dir / args.output_dir
@@ -188,14 +305,17 @@ def main():
             shutil.rmtree(vanilla_prompts)
         shutil.copytree(prompt_dir, vanilla_prompts)
 
+        vanilla_market = MarketData(start=args.start, end=args.end)
+        vanilla_market.fetch()
+
         results["vanilla"] = run_backtest(
             mode="vanilla",
-            client=client,
-            market=MarketData(start=args.start, end=args.end),
+            market=vanilla_market,
             prompt_dir=vanilla_prompts,
             repo_dir=repo_dir,
             mutation_interval=args.mutation_interval,
             model=args.model,
+            output_dir=output_dir,
         )
         # Re-fetch for second branch (iterator is consumed)
         results["vanilla"]["market_data"] = None
@@ -214,12 +334,12 @@ def main():
 
         results["elenchus"] = run_backtest(
             mode="elenchus",
-            client=client,
             market=elenchus_market,
             prompt_dir=elenchus_prompts,
             repo_dir=repo_dir,
             mutation_interval=args.mutation_interval,
             model=args.model,
+            output_dir=output_dir,
         )
 
     # Comparison report
