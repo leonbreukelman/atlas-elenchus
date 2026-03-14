@@ -44,9 +44,11 @@ class Pipeline:
         prompt_dir: Path,
         use_elenchus: bool = False,
         model: str = "openrouter/qwen/qwen3-235b-a22b",
+        probe_layers: list[int] | None = None,
     ):
         self.use_elenchus = use_elenchus
         self.model = model
+        self.probe_layers = probe_layers or [1, 2, 3]
         self.probe = ElenchusProbe(model) if use_elenchus else None
 
         # Initialize agents
@@ -94,7 +96,7 @@ class Pipeline:
                     continue
 
             # Elenchus probe on this layer's output
-            if self.probe and layer_recs:
+            if self.probe and layer_recs and layer_num in self.probe_layers:
                 elenchus_results = self.probe.probe_batch(layer_recs)
                 all_elenchus.extend(elenchus_results)
 
