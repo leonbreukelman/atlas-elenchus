@@ -23,6 +23,11 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+import signal
+import sys
+
+_shutdown_requested = False
+
 import litellm
 litellm.suppress_debug_info = True
 import pandas as pd
@@ -77,6 +82,14 @@ def _load_checkpoint(checkpoint_path: Path) -> dict | None:
         return None
 
 
+def _handle_shutdown(signum, frame):
+    """Handle SIGTERM/SIGINT — set flag so main loop saves checkpoint and exits cleanly."""
+    global _shutdown_requested
+    signal_name = signal.Signals(signum).name
+    print(f"\n  Received {signal_name} — will save checkpoint and exit after current day completes")
+    _shutdown_requested = True
+
+
 def run_backtest(
     mode: str,
     market: MarketData,
@@ -85,6 +98,7 @@ def run_backtest(
     mutation_interval: int = 20,
     model: str = "openrouter/qwen/qwen3-235b-a22b",
     output_dir: Path | None = None,
+    probe_layers: list[int] | None = None,
 ) -> dict:
     """
     Run a single backtest.
@@ -92,7 +106,7 @@ def run_backtest(
     mutation_interval: run autoresearch mutation every N trading days
     """
     use_elenchus = mode == "elenchus"
-    pipeline = Pipeline(prompt_dir, use_elenchus=use_elenchus, model=model)
+    pipeline = Pipeline(prompt_dir, use_elenchus=use_elenchus, model=model, probe_layers=probe_layers)
     portfolio = Portfolio(use_elenchus=use_elenchus)
     autoresearch = AutoresearchLoop(repo_dir, model=model)
 
@@ -231,6 +245,9 @@ def run_backtest(
             current_agent_weights, mutation_log, elenchus_log,
             portfolio.cumulative,
         )
+        if _shutdown_requested:
+            print(f"  Shutdown requested — checkpoint saved at day {day_count} ({date_str})")
+            sys.exit(0)
 
     # Backtest complete — remove checkpoint, save final results
     final_results_path = output_dir / f"{mode}_returns.csv"
@@ -262,6 +279,9 @@ def run_backtest(
 def main():
     load_dotenv()
 
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+
     parser = argparse.ArgumentParser(description="atlas-elenchus backtest")
     parser.add_argument("--mode", choices=["vanilla", "elenchus", "ab"], default="ab")
     parser.add_argument("--start", default="2024-09-01")
@@ -270,7 +290,10 @@ def main():
                         help="Run autoresearch mutation every N trading days")
     parser.add_argument("--model", default="openrouter/qwen/qwen3-235b-a22b")
     parser.add_argument("--output-dir", default="results")
+    parser.add_argument("--probe-layers", default="1,2,3",
+                        help="Comma-separated layer numbers to probe with Elenchus (default: 1,2,3)")
     args = parser.parse_args()
+    probe_layers = [int(x.strip()) for x in args.probe_layers.split(",")]
 
     # litellm reads API keys from environment automatically:
     #   OPENROUTER_API_KEY for openrouter/* models
@@ -316,6 +339,7 @@ def main():
             mutation_interval=args.mutation_interval,
             model=args.model,
             output_dir=output_dir,
+            probe_layers=probe_layers,
         )
         # Re-fetch for second branch (iterator is consumed)
         results["vanilla"]["market_data"] = None
@@ -340,6 +364,7 @@ def main():
             mutation_interval=args.mutation_interval,
             model=args.model,
             output_dir=output_dir,
+            probe_layers=probe_layers,
         )
 
     # Comparison report
