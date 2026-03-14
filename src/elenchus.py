@@ -21,7 +21,6 @@ import json
 from dataclasses import dataclass
 
 from .agent import Recommendation
-from .llm import completion_with_retry
 
 
 @dataclass
@@ -69,7 +68,7 @@ You must respond with JSON only:
 
 Rules:
 - Be rigorous. If the replaced component changes the logical basis for the trade, the conclusion does NOT survive.
-- A component is load-bearing if removing/replacing it would change what you'd recommend.
+- A component is load-bearing if removing/replacing it would change what you'd recommend. CRITICAL: Penalize tautologies, circular reasoning, or "universal truths" that do not provide specific, falsifiable market insight. These are decorative (easy-to-vary) even if they sound professional.
 - Don't be swayed by surface-level similarity. Test logical dependency.
 """
 
@@ -77,7 +76,7 @@ PERTURBATION_SYSTEM_PROMPT = """You generate plausible alternative reasoning com
 recommendations. Given one reasoning component, produce a replacement that:
 
 1. Is about the SAME domain (if original is about volatility, replacement is about volatility)
-2. Points in a DIFFERENT analytical direction (if original is bullish on vol, replacement is bearish or neutral)
+2. Points in the OPPOSITE analytical direction (e.g., if original is bullish, the replacement MUST be bearish) to test if the reasoning is truly load-bearing.
 3. Is equally specific and falsifiable
 4. Is realistic — something a competent analyst might actually say
 
@@ -97,11 +96,24 @@ class ElenchusProbe:
 
     def __init__(
         self,
-        model: str = "openrouter/qwen/qwen3-235b-a22b",
+        client,
+        model: str = "openrouter/qwen/qwen3-235b-a22b", random_mode: bool = False,
     ):
+        self.client = client
         self.model = model
+        self.random_mode = random_mode
 
     def probe(self, rec: Recommendation) -> ElenchusResult:
+        if self.random_mode:
+            import random
+            score = 1.0 if random.random() > 0.5 else 0.0
+            return ElenchusResult(
+                recommendation=rec,
+                probe_results=[],
+                deutsch_score=score,
+                total_components=len(rec.reasoning_components),
+                load_bearing_count=int(score * len(rec.reasoning_components)),
+            )
         """
         Probe a single recommendation. For each reasoning component:
         1. Generate a plausible replacement
@@ -149,9 +161,9 @@ class ElenchusProbe:
             f"Reasoning component to replace:\n{component}"
         )
 
-        response = completion_with_retry(
+        response = self.client.messages.create(
             model=self.model,
-            max_tokens=300,
+            max_tokens=300, timeout=180,
             messages=[
                 {"role": "system", "content": PERTURBATION_SYSTEM_PROMPT},
                 {"role": "user", "content": context},
@@ -159,7 +171,7 @@ class ElenchusProbe:
         )
 
         try:
-            raw = response.choices[0].message.content.strip()
+            raw = response.content[0].text.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1]
             if raw.endswith("```"):
@@ -215,9 +227,9 @@ class ElenchusProbe:
             f"from the MODIFIED reasoning?"
         )
 
-        response = completion_with_retry(
+        response = self.client.messages.create(
             model=self.model,
-            max_tokens=500,
+            max_tokens=500, timeout=180,
             messages=[
                 {"role": "system", "content": PROBE_SYSTEM_PROMPT},
                 {"role": "user", "content": context},
@@ -225,7 +237,7 @@ class ElenchusProbe:
         )
 
         try:
-            raw = response.choices[0].message.content.strip()
+            raw = response.content[0].text.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1]
             if raw.endswith("```"):

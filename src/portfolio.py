@@ -5,8 +5,7 @@ Converts agent recommendations into sized positions, tracks P&L, computes Sharpe
 
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 
 from .agent import Agent, Recommendation
 from .elenchus import ElenchusResult

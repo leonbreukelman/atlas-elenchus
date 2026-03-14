@@ -20,7 +20,6 @@ import argparse
 import json
 import os
 import shutil
-from datetime import datetime
 from pathlib import Path
 
 import signal
@@ -32,7 +31,6 @@ import litellm
 litellm.suppress_debug_info = True
 import pandas as pd
 from dotenv import load_dotenv
-from tabulate import tabulate
 
 from src.market_data import MarketData
 from src.pipeline import Pipeline
@@ -105,8 +103,11 @@ def run_backtest(
     mode: "vanilla" | "elenchus"
     mutation_interval: run autoresearch mutation every N trading days
     """
-    use_elenchus = mode == "elenchus"
-    pipeline = Pipeline(prompt_dir, use_elenchus=use_elenchus, model=model, probe_layers=probe_layers)
+    use_elenchus = mode == "elenchus" or mode == "random_elenchus"
+    random_mode = mode == "random_elenchus"
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    pipeline = Pipeline(prompt_dir, client=client, use_elenchus=use_elenchus, random_mode=random_mode, model=model, probe_layers=probe_layers)
     portfolio = Portfolio(use_elenchus=use_elenchus)
     autoresearch = AutoresearchLoop(repo_dir, model=model)
 
@@ -227,7 +228,7 @@ def run_backtest(
             print(f"\n  Day {day_count} ({date_str})")
             print(f"  Portfolio Sharpe: {portfolio.sharpe:.3f}")
             print(f"  Cumulative return: {portfolio.cumulative - 1:.2%}")
-            print(f"  Agent weights:")
+            print("  Agent weights:")
             for agent in sorted(pipeline.agents.values(), key=lambda a: a.darwinian_weight, reverse=True):
                 print(f"    {agent.agent_id:20s}  w={agent.darwinian_weight:.3f}  sharpe={agent.rolling_sharpe:.3f}")
 
@@ -255,7 +256,7 @@ def run_backtest(
     daily_df.to_csv(final_results_path, index=False)
     if checkpoint_path.exists():
         checkpoint_path.unlink()
-        print(f"  Checkpoint removed (backtest complete)")
+        print("  Checkpoint removed (backtest complete)")
 
     # Final results
     results = {
@@ -283,7 +284,7 @@ def main():
     signal.signal(signal.SIGINT, _handle_shutdown)
 
     parser = argparse.ArgumentParser(description="atlas-elenchus backtest")
-    parser.add_argument("--mode", choices=["vanilla", "elenchus", "ab"], default="ab")
+    parser.add_argument("--mode", choices=["vanilla", "elenchus", "ab", "random_elenchus"], default="ab")
     parser.add_argument("--start", default="2024-09-01")
     parser.add_argument("--end", default=None)
     parser.add_argument("--mutation-interval", type=int, default=20,
@@ -370,7 +371,7 @@ def main():
     # Comparison report
     if args.mode == "ab" and "vanilla" in results and "elenchus" in results:
         print(f"\n{'='*60}")
-        print(f"  A/B COMPARISON")
+        print("  A/B COMPARISON")
         print(f"{'='*60}")
         print(f"  {'Metric':<30s} {'Vanilla':>12s} {'Elenchus':>12s}")
         print(f"  {'-'*54}")
@@ -383,7 +384,7 @@ def main():
         if results["elenchus"]["elenchus_log"]:
             elenchus_df = pd.DataFrame(results["elenchus"]["elenchus_log"])
             elenchus_df.to_csv(output_dir / "elenchus_analysis.csv", index=False)
-            print(f"\n  Elenchus stats:")
+            print("\n  Elenchus stats:")
             print(f"    Total probes: {len(elenchus_df)}")
             print(f"    Mean deutsch_score: {elenchus_df['deutsch_score'].mean():.3f}")
             print(f"    Hard-to-vary rate: {elenchus_df['hard_to_vary'].mean():.1%}")

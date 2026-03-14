@@ -1,0 +1,254 @@
+{
+  "mode": "elenchus",
+  "daily_returns": [
+    {
+      "date": "2024-10-15",
+      "return": -0.01572029822189832,
+      "cumulative": -0.015720298221898354
+    },
+    {
+      "date": "2024-10-16",
+      "return": 0.016063278448841135,
+      "cumulative": 9.046069930551681e-05
+    },
+    {
+      "date": "2024-10-17",
+      "return": 0.022017593278238292,
+      "cumulative": 0.02211004570442876
+    },
+    {
+      "date": "2024-10-18",
+      "return": -0.0025301866209625212,
+      "cumulative": 0.0195239165416361
+    },
+    {
+      "date": "2024-10-21",
+      "return": 0.01135873209968272,
+      "cumulative": 0.031104415578851796
+    },
+    {
+      "date": "2024-10-22",
+      "return": -0.0008796551488709319,
+      "cumulative": 0.030197399270664338
+    },
+    {
+      "date": "2024-10-23",
+      "return": -0.0016448422639415599,
+      "cumulative": 0.02850288704814119
+    },
+    {
+      "date": "2024-10-24",
+      "return": -0.0009734686206181892,
+      "cumulative": 0.027501671761384516
+    },
+    {
+      "date": "2024-10-25",
+      "return": 0.007263324699180119,
+      "cumulative": 0.03496475003233801
+    },
+    {
+      "date": "2024-10-28",
+      "return": 0.00461008501573652,
+      "cumulative": 0.039736025518277485
+    },
+    {
+      "date": "2024-10-29",
+      "return": 0.010085613696127949,
+      "cumulative": 0.05022240141760226
+    },
+    {
+      "date": "2024-10-30",
+      "return": -0.006492262151601391,
+      "cumulative": 0.04340408227011494
+    },
+    {
+      "date": "2024-10-31",
+      "return": -0.009022899804190309,
+      "cumulative": 0.03398955178050844
+    },
+    {
+      "date": "2024-11-01",
+      "return": 0.016950332061024146,
+      "cumulative": 0.05151601803081762
+    },
+    {
+      "date": "2024-11-04",
+      "return": 0.007576940391888431,
+      "cumulative": 0.05948329222055304
+    },
+    {
+      "date": "2024-11-05",
+      "return": 0.006435187012305822,
+      "cumulative": 0.06630126534240577
+    },
+    {
+      "date": "2024-11-06",
+      "return": 0.05667659694877987,
+      "cumulative": 0.1267355923841913
+    }
+  ],
+  "agent_weights": {
+    "macro_regime": {
+      "weight": 1.0,
+      "sharpe": 0.0
+    },
+    "rates_yield": {
+      "weight": 1.0,
+      "sharpe": 0.0
+    },
+    "volatility": {
+      "weight": 1.0,
+      "sharpe": 0.0
+    },
+    "tech_semi": {
+      "weight": 1.0,
+      "sharpe": 0.0
+    },
+    "energy": {
+      "weight": 1.0,
+      "sharpe": 0.0
+    },
+    "quality": {
+      "weight": 1.0,
+      "sharpe": 0.0
+    },
+    "risk_officer": {
+      "weight": 1.0,
+      "sharpe": 0.0
+    },
+    "cio": {
+      "weight": 1.0,
+      "sharpe": 0.0
+    }
+  },
+  "mutation_log": [],
+  "elenchus_log": [
+    {
+      "date": "2024-10-15",
+      "agent": "cio",
+      "ticker": "JPM",
+      "deutsch_score": 0.75,
+      "load_bearing": 3,
+      "total_components": 4,
+      "hard_to_vary": true
+    },
+    {
+      "date": "2024-10-15",
+      "agent": "cio",
+      "ticker": "NVDA",
+      "deutsch_score": 0.5,
+      "load_bearing": 2,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-10-15",
+      "agent": "cio",
+      "ticker": "AAPL",
+      "deutsch_score": 0.25,
+      "load_bearing": 1,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-10-15",
+      "agent": "cio",
+      "ticker": "XOM",
+      "deutsch_score": 0.5,
+      "load_bearing": 2,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-10-15",
+      "agent": "cio",
+      "ticker": "TSM",
+      "deutsch_score": 0.25,
+      "load_bearing": 1,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-11-05",
+      "agent": "risk_officer",
+      "ticker": "NVDA",
+      "deutsch_score": 0.25,
+      "load_bearing": 1,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-11-05",
+      "agent": "risk_officer",
+      "ticker": "AVGO",
+      "deutsch_score": 0.0,
+      "load_bearing": 0,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-11-05",
+      "agent": "risk_officer",
+      "ticker": "TSM",
+      "deutsch_score": 0.25,
+      "load_bearing": 1,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-11-05",
+      "agent": "risk_officer",
+      "ticker": "AMZN",
+      "deutsch_score": 0.0,
+      "load_bearing": 0,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-11-05",
+      "agent": "risk_officer",
+      "ticker": "CVX",
+      "deutsch_score": 0.0,
+      "load_bearing": 0,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-11-05",
+      "agent": "risk_officer",
+      "ticker": "XOM",
+      "deutsch_score": 0.25,
+      "load_bearing": 1,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-11-05",
+      "agent": "risk_officer",
+      "ticker": "SLB",
+      "deutsch_score": 0.5,
+      "load_bearing": 2,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-11-05",
+      "agent": "risk_officer",
+      "ticker": "JPM",
+      "deutsch_score": 0.5,
+      "load_bearing": 2,
+      "total_components": 4,
+      "hard_to_vary": false
+    },
+    {
+      "date": "2024-11-05",
+      "agent": "risk_officer",
+      "ticker": "AMGN",
+      "deutsch_score": 0.5,
+      "load_bearing": 2,
+      "total_components": 4,
+      "hard_to_vary": false
+    }
+  ],
+  "cumulative": 1.1267355923841913
+}

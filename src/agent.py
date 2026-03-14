@@ -4,7 +4,7 @@ Every recommendation includes structured reasoning — Elenchus probes this.
 """
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .llm import completion_with_retry
@@ -166,7 +166,7 @@ class Agent:
                     raw_response=raw,
                 ))
             return recs
-        except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
             # Agent produced unparseable output — counts as a failed recommendation
             return []
 
