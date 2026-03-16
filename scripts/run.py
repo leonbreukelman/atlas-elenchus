@@ -178,10 +178,21 @@ def run_backtest(
                     "date": date_str,
                     "agent": er.recommendation.agent_id,
                     "ticker": er.recommendation.ticker,
+                    "conclusion": er.recommendation.conclusion,
+                    "reasoning_components": er.recommendation.reasoning_components,
                     "deutsch_score": er.deutsch_score,
                     "load_bearing": er.load_bearing_count,
                     "total_components": er.total_components,
                     "hard_to_vary": er.is_hard_to_vary,
+                    "probes": [
+                        {
+                            "component": pr.original_component,
+                            "replacement": pr.replacement_component,
+                            "survived": pr.conclusion_survived,
+                            "reasoning": pr.probe_reasoning,
+                        }
+                        for pr in er.probe_results
+                    ],
                 })
 
         # Rebalance portfolio
@@ -369,7 +380,7 @@ def main():
         )
 
     # Comparison report
-    if args.mode == "ab" and "vanilla" in results and "elenchus" in results:
+    if "vanilla" in results and "elenchus" in results:
         print(f"\n{'='*60}")
         print("  A/B COMPARISON")
         print(f"{'='*60}")
@@ -380,22 +391,25 @@ def main():
         print(f"  {'Mutations Applied':<30s} {results['vanilla']['mutations']:>12d} {results['elenchus']['mutations']:>12d}")
         print(f"  {'Trading Days':<30s} {results['vanilla']['trading_days']:>12d} {results['elenchus']['trading_days']:>12d}")
 
-        # Save elenchus analysis
-        if results["elenchus"]["elenchus_log"]:
-            elenchus_df = pd.DataFrame(results["elenchus"]["elenchus_log"])
-            elenchus_df.to_csv(output_dir / "elenchus_analysis.csv", index=False)
-            print("\n  Elenchus stats:")
-            print(f"    Total probes: {len(elenchus_df)}")
-            print(f"    Mean deutsch_score: {elenchus_df['deutsch_score'].mean():.3f}")
-            print(f"    Hard-to-vary rate: {elenchus_df['hard_to_vary'].mean():.1%}")
-            print(f"    Filtered (easy-to-vary): {(~elenchus_df['hard_to_vary']).sum()}")
-
-    # Save results
+    # Save results and analysis
     for branch_name, branch_results in results.items():
-        if branch_results and "daily_returns" in branch_results:
-            branch_results["daily_returns"].to_csv(
-                output_dir / f"{branch_name}_returns.csv", index=False
-            )
+        if not branch_results:
+            continue
+
+        if "daily_returns" in branch_results:
+            returns_path = output_dir / f"{branch_name}_returns.csv"
+            branch_results["daily_returns"].to_csv(returns_path, index=False)
+            
+        # Save elenchus analysis if this is the elenchus branch
+        if branch_name == "elenchus" and branch_results.get("elenchus_log"):
+            elenchus_df = pd.DataFrame(branch_results["elenchus_log"])
+            analysis_path = output_dir / "elenchus_analysis.csv"
+            elenchus_df.to_csv(analysis_path, index=False)
+            print(f"\n  Elenchus analysis saved to {analysis_path}")
+            print(f"    Total probes: {len(elenchus_df)}")
+            print(f"    Mean deutsch_score: {elenchus_df[\x27deutsch_score\x27].mean():.3f}")
+            print(f"    Hard-to-vary rate: {elenchus_df[\x27hard_to_vary\x27].mean():.1%}")
+            print(f"    Filtered (easy-to-vary): {(~elenchus_df[\x27hard_to_vary\x27]).sum()}")
 
     print(f"\nResults saved to {output_dir}/")
 
