@@ -1,4 +1,5 @@
 {
+  "_note": "Static example checkpoint data kept under version control intentionally (e.g. for tests/docs), not a runtime-generated artifact.",
   "mode": "vanilla",
   "daily_returns": [
     {
