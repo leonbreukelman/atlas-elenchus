@@ -20,6 +20,7 @@ Combines three ideas:
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Running the Experiment](#running-the-experiment)
+- [Resilience](#resilience)
 - [Understanding the Output](#understanding-the-output)
 - [Interpreting Results](#interpreting-results)
 - [Project Structure](#project-structure)
@@ -27,6 +28,7 @@ Combines three ideas:
 - [Cost Estimates](#cost-estimates)
 - [Known Limitations](#known-limitations)
 - [Theoretical Context](#theoretical-context)
+- [A/B Results](#ab-results)
 
 ---
 
@@ -184,17 +186,19 @@ Market Data (yfinance)
 ```
 Market Data (yfinance)
     → Layer 1 agents produce recommendations with reasoning
-    → ELENCHUS PROBE: test each L1 recommendation's reasoning components
+    → ELENCHUS PROBE: test each L1 recommendation's reasoning components  [if L1 in --probe-layers]
     → Filter: discard recommendations with deutsch_score < 0.6
     → Layer 2 agents receive filtered L1 signals
-    → ELENCHUS PROBE: test each L2 recommendation
+    → ELENCHUS PROBE: test each L2 recommendation                         [if L2 in --probe-layers]
     → Filter again
     → Layer 3 agents receive filtered L2 signals
-    → ELENCHUS PROBE: test each L3 recommendation
+    → ELENCHUS PROBE: test each L3 recommendation                         [if L3 in --probe-layers]
     → Portfolio: rank by (conviction × darwinian_weight × deutsch_score), take top N
     → Mark to market daily
     → Every 20 days: score agents, adjust Darwinian weights, mutate worst prompt
 ```
+
+Probing is configurable via `--probe-layers`. The production 250-day run used L3-only probing (`--probe-layers 3`), which applies the probe only to the CIO and risk_officer outputs, reducing probe API calls by ~75%.
 
 ### Autoresearch Loop (shared by both branches)
 
@@ -213,9 +217,27 @@ Every `--mutation-interval` trading days (default: 20):
 
 ---
 
-## Initial A/B Results
+## A/B Results
 
-19-day backtest, Dec 16 2024 -- Jan 14 2025. Model: Qwen3-235B via OpenRouter.
+### Full 219-day run
+
+219 trading days (production run). Model: Qwen3-235B via OpenRouter. Elenchus used L3-only probing (`--probe-layers 3`).
+
+| Metric | Vanilla | Elenchus (L3-only) |
+|---|---|---|
+| Cumulative Return | +512.96% | +402.19% |
+| Trading Days | 219 | 219 |
+
+**Caveats:** No transaction costs, survivorship bias in the ticker universe, frictionless simulation. Absolute numbers are inflated relative to real-world trading. The A/B comparison is valid — both branches share the same biases — but these figures should not be read as performance claims.
+
+Additional findings from the full run:
+- 90% filter rate — roughly 90% of recommendations that reach the probe are discarded
+- Mean deutsch score of 0.243 across all probed recommendations
+- The Elenchus branch consistently makes more concentrated bets, which amplifies both upside and downside relative to vanilla
+
+### Early pilot (19-day)
+
+19-day pilot, Dec 16 2024 -- Jan 14 2025.
 
 | Metric | Vanilla | Elenchus |
 |---|---|---|
@@ -225,12 +247,10 @@ Every `--mutation-interval` trading days (default: 20):
 | Win Rate | 73.7% | 73.7% |
 | Daily Volatility | 1.45% | 2.74% |
 
-Key findings:
-
+Key findings from pilot:
 - The Deutsch Probe produces a genuinely different portfolio (0.107 correlation with vanilla)
-- 31% of filtered recommendations scored 0.00 -- completely decorative reasoning
-- The filter is currently too aggressive (threshold 0.6), leaving ~3.3 recommendations/day and creating concentration risk
-- Outperformance is fragile -- concentrated in a single day
+- 31% of filtered recommendations scored 0.00 — completely decorative reasoning
+- The filter is aggressive (threshold 0.6), leaving ~3.3 recommendations/day and creating concentration risk
 - The mechanism works; calibration needs refinement
 
 ---
@@ -262,7 +282,8 @@ uv sync
 
 # Create environment configuration
 cp .env.example .env
-# Edit .env and add your API key (OPENROUTER_API_KEY or ANTHROPIC_API_KEY)
+# Edit .env and add your API key. OPENROUTER_API_KEY is the primary requirement.
+# ANTHROPIC_API_KEY is optional — only needed if using Claude models via litellm directly.
 
 # Initialize git repository (required for autoresearch keep/discard)
 git init
@@ -277,10 +298,9 @@ git commit -m "initial"
 ### Environment variables (`.env`)
 
 ```
-# Which key you need depends on model choice:
-#   openrouter/* models → OPENROUTER_API_KEY
-#   anthropic/* models  → ANTHROPIC_API_KEY
+# Primary requirement:
 OPENROUTER_API_KEY=sk-or-v1-...
+# Optional — only needed if using Claude models via litellm directly:
 ANTHROPIC_API_KEY=sk-ant-...
 FMP_API_KEY=                     # Optional: for fundamental data
 BRANCH_PREFIX=autoresearch       # Git branch prefix
@@ -291,11 +311,12 @@ MODE=ab                          # Default run mode
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--mode` | `ab` | `vanilla` (no probe), `elenchus` (with probe), or `ab` (runs both, compares) |
+| `--mode` | `ab` | `vanilla` (no probe), `elenchus` (with probe), `ab` (runs both, compares), or `random_elenchus` (random baseline — randomly accepts/rejects recommendations via coin flip instead of probing reasoning; control condition for validating whether the probe measures anything real) |
 | `--start` | `2024-09-01` | Backtest start date (YYYY-MM-DD) |
 | `--end` | today | Backtest end date |
 | `--mutation-interval` | `20` | Run autoresearch prompt mutation every N trading days |
-| `--model` | `claude-sonnet-4-20250514` | Anthropic model for all agents and probes |
+| `--model` | `openrouter/qwen/qwen3-235b-a22b` | LLM for all agents and probes (any litellm-supported model) |
+| `--probe-layers` | `1,2,3` | Comma-separated layer numbers to probe. Use `--probe-layers 3` for L3-only probing (CIO + risk_officer only), which reduces probe API calls by ~75%. |
 | `--output-dir` | `results` | Directory for output CSVs |
 
 ---
@@ -335,6 +356,32 @@ uv run python -m scripts.run --mode elenchus --start 2025-01-01 --end 2025-03-01
 uv run python -m scripts.run --mode elenchus --start 2025-06-01 --end 2025-07-01 \
     --mutation-interval 5
 ```
+
+---
+
+## Resilience
+
+Long backtests (250+ days) take many hours. The system is built to survive interruptions and restarts without losing progress.
+
+### Checkpointing
+
+The backtest saves state atomically after each completed trading day. On restart, it detects the checkpoint and resumes from the last completed day. Checkpoint files are written to `results/backtest_status.json`.
+
+### Graceful Shutdown
+
+SIGTERM and SIGINT (Ctrl+C) are handled. The running day completes, state is saved, and the process exits cleanly. No partial-day data is written.
+
+### Auto-Restart
+
+`scripts/run_monitored.sh` wraps the backtest with up to 10 restart attempts, with a 2-minute gap between attempts. Each attempt rotates to a new log file to prevent unbounded log growth.
+
+### Signal Notifications
+
+`scripts/signal_notify.py` writes JSON signal files to `~/maei/data/signals/inbox/` on crash, completion, or failure. This integrates with external monitoring without requiring a persistent daemon.
+
+### Log Rotation
+
+Each restart attempt in `run_monitored.sh` writes to a numbered log file (`run_1.log`, `run_2.log`, etc.), preventing any single log file from growing unbounded across restarts.
 
 ---
 
@@ -409,6 +456,9 @@ For Elenchus mode, you'll also see filtering messages:
 | `load_bearing` | Count of components that were necessary |
 | `total_components` | Total reasoning components probed |
 | `hard_to_vary` | Boolean: did this pass the 0.6 threshold? |
+| `conclusion` | The synthesized rationale from the agent |
+| `reasoning_components` | Full list of reasoning components as submitted to the probe |
+| `probes` | Nested list of per-probe results — each entry contains `component` (original text), `replacement` (generated alternative), `survived` (boolean: did the conclusion hold after replacement?), and `reasoning` (judge agent's explanation) |
 
 ---
 
@@ -469,7 +519,8 @@ atlas-elenchus/
 │
 ├── scripts/
 │   ├── run.py                # Main entry point
-│   └── run_monitored.sh      # Wrapper script with logging
+│   ├── run_monitored.sh      # Auto-restart wrapper with up to 10 attempts, per-attempt log rotation, status tracking (results/backtest_status.json), and crash/completion signal notifications
+│   └── signal_notify.py      # Writes JSON signal files to ~/maei/data/signals/inbox/ for external monitoring integration
 │
 ├── src/
 │   ├── __init__.py
@@ -494,7 +545,7 @@ atlas-elenchus/
 
 **`src/elenchus.py`** — The Deutsch Probe. For each recommendation's reasoning components: (1) a perturbation agent generates a plausible alternative for one component, (2) a judge agent evaluates whether the conclusion survives the swap. Produces a `deutsch_score` (ratio of load-bearing components). Threshold of 0.6 classifies as "hard to vary."
 
-**`src/pipeline.py`** — Orchestrates agents across layers. Each layer's output feeds into the next as upstream signals. When Elenchus is active, recommendations are probed between layers, and those below the deutsch_score threshold are filtered before passing upstream.
+**`src/pipeline.py`** — Orchestrates agents across layers. Each layer's output feeds into the next as upstream signals. Accepts a `probe_layers` parameter (list of layer numbers, default `[1, 2, 3]`) controlling which layers are probed. When Elenchus is active, only the configured layers have their recommendations probed; other layers pass through without probing. The production 250-day run used L3-only probing.
 
 **`src/portfolio.py`** — Converts recommendations into sized positions. Vanilla scoring: `conviction × darwinian_weight`. Elenchus scoring: `conviction × darwinian_weight × deutsch_score`. Tracks daily P&L, calculates annualized Sharpe, and handles Darwinian quartile-based weight updates.
 
@@ -552,14 +603,17 @@ Costs vary significantly by model. Estimates below are per 250 trading days (app
 
 **Full backtest cost estimates (250 trading days, A/B mode):**
 
-| Model | Vanilla | Elenchus | A/B (both) |
-|---|---|---|---|
-| `openrouter/qwen/qwen3-235b-a22b` | ~$15–30 | ~$50–100 | ~$65–130 |
-| `openrouter/deepseek/deepseek-chat-v3` | ~$10–20 | ~$35–70 | ~$45–90 |
-| `anthropic/claude-sonnet-4-20250514` | ~$125–250 | ~$500–1,000 | ~$625–1,250 |
-| `ollama/qwen3:32b` (local) | Free | Free | Free |
+| Model | Vanilla | Elenchus (all layers) | Elenchus (L3-only) | A/B (both) |
+|---|---|---|---|---|
+| `openrouter/qwen/qwen3-235b-a22b` | ~$15–30 | ~$50–100 | ~$4–6 | ~$65–130 |
+| `openrouter/deepseek/deepseek-chat-v3` | ~$10–20 | ~$35–70 | ~$3–5 | ~$45–90 |
+| `anthropic/claude-sonnet-4-20250514` | ~$125–250 | ~$500–1,000 | ~$125–200 | ~$625–1,250 |
+| `ollama/qwen3:32b` (local) | Free | Free | Free | Free |
+
+L3-only probing (`--probe-layers 3`) applies the Deutsch Probe only to the CIO and risk_officer outputs. This cuts probe API calls by ~75% relative to all-layer probing.
 
 **Cost reduction strategies:**
+- Use `--probe-layers 3` for L3-only probing — the 250-day production run used this setting
 - Use a cheap model (OpenRouter Qwen/DeepSeek, or local Ollama) during development
 - Reduce `--mutation-interval` to get faster feedback on fewer days
 - Shorten the date range for initial validation before running full backtest
@@ -629,4 +683,4 @@ If it doesn't correlate, that's equally important — it would mean current LLM 
 
 ## License
 
-MIT
+[PolyForm Noncommercial 1.0.0](LICENSE.md) — free for research, academic, and personal use. Commercial use requires permission from the author.

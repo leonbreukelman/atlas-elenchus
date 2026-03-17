@@ -28,6 +28,8 @@ Market Data → [L1: Macro Agents] → Elenchus Probe → [L2: Sector Agents] �
                                                                                                 Autoresearch (mutate worst agent)
 ```
 
+Note: probing is configurable via `--probe-layers`. The production 250-day run used L3-only probing (`--probe-layers 3`), which applies the Deutsch Probe to the CIO and risk_officer outputs only, reducing probe API calls by ~75%.
+
 ## Deutsch Probe Detail
 
 ```
@@ -51,7 +53,7 @@ Probe Component 4:
 ## Autoresearch Loop
 
 ```
-Every 20 trading days:
+Every N trading days (configurable via --mutation-interval, default: 20):
   1. Rank agents by rolling Sharpe
   2. Score quartiles → adjust Darwinian weights
   3. Identify worst agent

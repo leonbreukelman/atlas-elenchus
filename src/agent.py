@@ -31,7 +31,7 @@ class Agent:
     The darwinian weight determines signal strength in the pipeline.
     """
     agent_id: str
-    layer: int                        # 1=macro, 2=sector, 3=superinvestor, 4=decision
+    layer: int                        # 1=macro, 2=sector, 3=decision
     prompt_path: Path                 # path to the .md prompt file
     darwinian_weight: float = 1.0     # range [0.3, 2.5]
     rolling_sharpe: float = 0.0
@@ -60,7 +60,7 @@ class Agent:
     ) -> list[Recommendation]:
         """
         Produce recommendations for current market snapshot.
-        Upstream signals come from prior layers (L1→L2→L3→L4).
+        Upstream signals come from prior layers (L1→L2→L3).
 
         Response contract — agent must return JSON:
         {
