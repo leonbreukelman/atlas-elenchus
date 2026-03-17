@@ -106,6 +106,11 @@ class ElenchusProbe:
         self.random_mode = random_mode
 
     def probe(self, rec: Recommendation) -> ElenchusResult:
+        """
+        Probe a single recommendation. For each reasoning component:
+        1. Generate a plausible replacement
+        2. Test if the conclusion survives the swap
+        """
         if self.random_mode:
             import random
             score = 1.0 if random.random() > 0.5 else 0.0
@@ -116,11 +121,6 @@ class ElenchusProbe:
                 total_components=len(rec.reasoning_components),
                 load_bearing_count=int(score * len(rec.reasoning_components)),
             )
-        """
-        Probe a single recommendation. For each reasoning component:
-        1. Generate a plausible replacement
-        2. Test if the conclusion survives the swap
-        """
         if not rec.reasoning_components:
             return ElenchusResult(
                 recommendation=rec,
@@ -282,7 +282,7 @@ class ElenchusProbe:
     def _call_llm(self, max_tokens: int, messages: list[dict]) -> object:
         """Call LLM via client (testing) or litellm (production)."""
         if self.client is not None:
-            # Mock/test path — uses Anthropic-style client
+            # Test path — uses mock client with Anthropic-style interface
             return self.client.messages.create(
                 model=self.model,
                 max_tokens=max_tokens,

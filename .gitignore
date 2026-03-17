@@ -10,4 +10,8 @@ prompts/agents_elenchus/
 results/*.log
 results/*.png
 results/backtest_status.json
+results/*.json
+results/*.csv
+results/19day_backup/
+results_elenchus/
 uv.lock

@@ -399,7 +399,7 @@ def main():
             branch_results["daily_returns"].to_csv(returns_path, index=False)
             
         # Save elenchus analysis if this is the elenchus branch
-        if branch_name == "elenchus" and branch_results.get("elenchus_log"):
+        if branch_name in ("elenchus", "random_elenchus") and branch_results.get("elenchus_log"):
             elenchus_df = pd.DataFrame(branch_results["elenchus_log"])
             analysis_path = output_dir / "elenchus_analysis.csv"
             elenchus_df.to_csv(analysis_path, index=False)
