@@ -81,11 +81,6 @@ def test_tautology_detection(probe, real_recommendation):
     If we replace a component with a universal truth (tautology),
     it should be flagged as decorative (easy to vary).
     """
-    """
-    TAUTOLOGY TEST:
-    If we replace a component with a universal truth (tautology),
-    it should be flagged as decorative (easy to vary).
-    """
     tautological_rec = Recommendation(
         agent_id=real_recommendation.agent_id,
         date=real_recommendation.date,
