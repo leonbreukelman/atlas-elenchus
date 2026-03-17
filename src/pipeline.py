@@ -41,7 +41,7 @@ class Pipeline:
 
     def __init__(
         self,
-        prompt_dir: Path, client=None,
+        prompt_dir: Path,
         use_elenchus: bool = False, random_mode: bool = False,
         model: str = "openrouter/qwen/qwen3-235b-a22b",
         probe_layers: list[int] | None = None,
@@ -49,7 +49,7 @@ class Pipeline:
         self.use_elenchus = use_elenchus
         self.model = model
         self.probe_layers = probe_layers or [1, 2, 3]
-        self.probe = ElenchusProbe(client=client, model=model, random_mode=random_mode) if use_elenchus else None
+        self.probe = ElenchusProbe(model=model, random_mode=random_mode) if use_elenchus else None
 
         # Initialize agents
         self.agents: dict[str, Agent] = {}

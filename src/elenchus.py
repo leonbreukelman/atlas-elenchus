@@ -21,6 +21,7 @@ import json
 from dataclasses import dataclass
 
 from .agent import Recommendation
+from .llm import completion_with_retry
 
 
 @dataclass
@@ -96,8 +97,9 @@ class ElenchusProbe:
 
     def __init__(
         self,
-        client,
-        model: str = "openrouter/qwen/qwen3-235b-a22b", random_mode: bool = False,
+        client=None,
+        model: str = "openrouter/qwen/qwen3-235b-a22b",
+        random_mode: bool = False,
     ):
         self.client = client
         self.model = model
@@ -161,9 +163,8 @@ class ElenchusProbe:
             f"Reasoning component to replace:\n{component}"
         )
 
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=300, timeout=180,
+        response = self._call_llm(
+            max_tokens=300,
             messages=[
                 {"role": "system", "content": PERTURBATION_SYSTEM_PROMPT},
                 {"role": "user", "content": context},
@@ -227,9 +228,8 @@ class ElenchusProbe:
             f"from the MODIFIED reasoning?"
         )
 
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=500, timeout=180,
+        response = self._call_llm(
+            max_tokens=500,
             messages=[
                 {"role": "system", "content": PROBE_SYSTEM_PROMPT},
                 {"role": "user", "content": context},
@@ -278,6 +278,30 @@ class ElenchusProbe:
                 conclusion_survived=True,
                 probe_reasoning="[PROBE PARSE FAILURE]",
             )
+
+    def _call_llm(self, max_tokens: int, messages: list[dict]) -> object:
+        """Call LLM via client (testing) or litellm (production)."""
+        if self.client is not None:
+            # Mock/test path — uses Anthropic-style client
+            return self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                timeout=180,
+                messages=messages,
+            )
+        # Production path — uses litellm via retry wrapper
+        response = completion_with_retry(
+            model=self.model,
+            max_tokens=max_tokens,
+            messages=messages,
+        )
+        # Wrap litellm response to match Anthropic-style access pattern
+        # (response.content[0].text) so downstream parsing works unchanged
+        class _Wrapper:
+            def __init__(self, text):
+                self.text = text
+                self.content = [self]
+        return _Wrapper(response.choices[0].message.content)
 
     def probe_batch(self, recs: list[Recommendation]) -> list[ElenchusResult]:
         """Probe all recommendations from a single day."""

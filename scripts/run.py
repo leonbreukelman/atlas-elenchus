@@ -105,9 +105,7 @@ def run_backtest(
     """
     use_elenchus = mode == "elenchus" or mode == "random_elenchus"
     random_mode = mode == "random_elenchus"
-    import anthropic
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    pipeline = Pipeline(prompt_dir, client=client, use_elenchus=use_elenchus, random_mode=random_mode, model=model, probe_layers=probe_layers)
+    pipeline = Pipeline(prompt_dir, use_elenchus=use_elenchus, random_mode=random_mode, model=model, probe_layers=probe_layers)
     portfolio = Portfolio(use_elenchus=use_elenchus)
     autoresearch = AutoresearchLoop(repo_dir, model=model)
 
