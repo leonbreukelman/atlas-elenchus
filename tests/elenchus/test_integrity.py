@@ -72,8 +72,8 @@ def test_frankenstein_shuffling(probe, real_recommendation, unrelated_recommenda
     result = probe.probe(frankenstein)
     
     # A successful probe should recognize that NONE of these components support the NVDA conclusion
-    assert result.deutsch_score == 1.0
-    assert result.is_hard_to_vary
+    assert result.deutsch_score == 0.0
+    assert not result.is_hard_to_vary
 
 def test_tautology_detection(probe, real_recommendation):
     """
