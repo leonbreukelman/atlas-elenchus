@@ -284,7 +284,7 @@ def main():
     signal.signal(signal.SIGINT, _handle_shutdown)
 
     parser = argparse.ArgumentParser(description="atlas-elenchus backtest")
-    parser.add_argument("--mode", choices=["vanilla", "elenchus", "ab", "random_elenchus"], default="ab")
+    parser.add_argument("--mode", choices=["vanilla", "elenchus", "ab"], default="ab")
     parser.add_argument("--start", default="2024-09-01")
     parser.add_argument("--end", default=None)
     parser.add_argument("--mutation-interval", type=int, default=20,
