@@ -407,9 +407,12 @@ def main():
             elenchus_df.to_csv(analysis_path, index=False)
             print(f"\n  Elenchus analysis saved to {analysis_path}")
             print(f"    Total probes: {len(elenchus_df)}")
-            print(f"    Mean deutsch_score: {elenchus_df[\x27deutsch_score\x27].mean():.3f}")
-            print(f"    Hard-to-vary rate: {elenchus_df[\x27hard_to_vary\x27].mean():.1%}")
-            print(f"    Filtered (easy-to-vary): {(~elenchus_df[\x27hard_to_vary\x27]).sum()}")
+            mean_ds = elenchus_df["deutsch_score"].mean()
+            htv_rate = elenchus_df["hard_to_vary"].mean()
+            filtered_count = (~elenchus_df["hard_to_vary"]).sum()
+            print(f"    Mean deutsch_score: {mean_ds:.3f}")
+            print(f"    Hard-to-vary rate: {htv_rate:.1%}")
+            print(f"    Filtered (easy-to-vary): {filtered_count}")
 
     print(f"\nResults saved to {output_dir}/")
 
