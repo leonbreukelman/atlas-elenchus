@@ -126,7 +126,7 @@ class ElenchusProbe:
         self.model = model
         self.probe_model = probe_model
         self.random_mode = random_mode
-        self.semaphore = asyncio.Semaphore(20)
+        self.semaphore = None
 
     def probe(self, rec: Recommendation) -> ElenchusResult:
         """
@@ -416,6 +416,7 @@ class ElenchusProbe:
             return []
 
         async def _run():
+            self.semaphore = asyncio.Semaphore(20)
             return await asyncio.gather(
                 *(self._aprobe_recommendation(rec) for rec in recs)
             )
