@@ -287,3 +287,52 @@ def test_select_positions_no_elenchus_uses_default_deutsch(engine):
     positions = engine._select_positions(recs, [], snapshot)
     assert len(positions) == 1
     assert positions[0].deutsch_score == 0.5
+
+
+def test_positions_changed_equals_trade_count(engine, monkeypatch):
+    """positions_changed must equal len(trades), not double-count the delta."""
+    from src.agent import Recommendation
+    from src.elenchus import ElenchusResult
+    import types
+    from datetime import datetime
+
+    def make_recs(tickers):
+        recs, ers = [], []
+        for t in tickers:
+            rec = Recommendation(
+                agent_id="tech_semi", date="2026-03-17", ticker=t,
+                direction="long", conviction=0.8,
+                reasoning_components=["reason"], conclusion=f"long {t}",
+            )
+            recs.append(rec)
+            ers.append(ElenchusResult(
+                recommendation=rec, probe_results=[], deutsch_score=0.8,
+                total_components=1, load_bearing_count=1,
+            ))
+        return recs, ers
+
+    snapshot = types.SimpleNamespace(date=datetime(2026, 3, 17))
+    all_prices = {t: 100.0 for t in ["AAPL", "MSFT", "NVDA", "GOOG", "AMZN"]}
+
+    monkeypatch.setattr(engine.market, "is_market_open_today", lambda: True)
+    monkeypatch.setattr(engine.market, "snapshot_live", lambda run_type: snapshot)
+    monkeypatch.setattr(engine.market, "get_fill_prices", lambda s, r: all_prices)
+
+    # Run 1: establish 3 positions
+    recs_3, ers_3 = make_recs(["AAPL", "MSFT", "NVDA"])
+    monkeypatch.setattr(engine.pipeline, "run_day", lambda s: (recs_3, ers_3))
+    engine.run("morning")
+
+    # Run 2: switch to 5 positions (3 closes + 5 opens = 8 trades)
+    recs_5, ers_5 = make_recs(["AAPL", "MSFT", "NVDA", "GOOG", "AMZN"])
+    snapshot2 = types.SimpleNamespace(date=datetime(2026, 3, 18))
+    monkeypatch.setattr(engine.market, "snapshot_live", lambda run_type: snapshot2)
+    monkeypatch.setattr(engine.pipeline, "run_day", lambda s: (recs_5, ers_5))
+
+    result = engine.run("morning")
+
+    # Bug: abs(5-3) + 8 = 10. Correct: 8.
+    assert result["positions_changed"] == result["trades_executed"], (
+        f"positions_changed={result['positions_changed']} != "
+        f"trades_executed={result['trades_executed']} — double-counting"
+    )

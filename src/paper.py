@@ -156,7 +156,7 @@ class PaperTradingEngine:
             "run_type": run_type,
             "portfolio_value": portfolio_value,
             "daily_return": daily_ret,
-            "positions_changed": abs(new_count - old_count) + len(trades),
+            "positions_changed": len(trades),
             "avg_deutsch_score": round(avg_deutsch, 3),
             "total_recommendations": len(recommendations),
             "total_probed": len(elenchus_results),
