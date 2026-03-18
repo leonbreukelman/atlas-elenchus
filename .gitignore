@@ -15,3 +15,7 @@ results/*.csv
 results/19day_backup/
 results_elenchus/
 uv.lock
+
+# Paper trading
+data/
+logs/
