@@ -44,12 +44,13 @@ class Pipeline:
         prompt_dir: Path,
         use_elenchus: bool = False, random_mode: bool = False,
         model: str = "openrouter/qwen/qwen3-235b-a22b",
+        probe_model: str = "openrouter/qwen/qwen3-30b-a3b",
         probe_layers: list[int] | None = None,
     ):
         self.use_elenchus = use_elenchus
         self.model = model
         self.probe_layers = probe_layers or [1, 2, 3]
-        self.probe = ElenchusProbe(model=model, random_mode=random_mode) if use_elenchus else None
+        self.probe = ElenchusProbe(model=model, probe_model=probe_model, random_mode=random_mode) if use_elenchus else None
 
         # Initialize agents
         self.agents: dict[str, Agent] = {}

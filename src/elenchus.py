@@ -87,6 +87,25 @@ Respond with JSON only:
 }
 """
 
+COMBINED_PROBE_SYSTEM_PROMPT = """You are testing whether a trading recommendation's reasoning is rigorous.
+
+Given a recommendation and one of its reasoning components, you must:
+1. Generate a plausible alternative claim that takes the OPPOSITE position on the same topic
+2. Judge whether the recommendation's conclusion would still logically follow if the original component were replaced with your alternative
+
+The alternative must be about the SAME domain as the original component, point in the OPPOSITE analytical direction, be equally specific and falsifiable, and be realistic — something a competent analyst might actually say.
+
+A component is "load-bearing" if replacing it breaks the conclusion.
+A component is "decorative" if the conclusion survives even with the opposite claim. CRITICAL: Tautologies, circular reasoning, or "universal truths" that do not provide specific, falsifiable market insight are decorative (easy-to-vary) even if they sound professional.
+
+Respond with JSON only:
+{
+  "replacement": "your alternative claim",
+  "conclusion_survives": true/false,
+  "reasoning": "brief explanation of your judgment"
+}
+"""
+
 
 class ElenchusProbe:
     """
@@ -99,10 +118,12 @@ class ElenchusProbe:
         self,
         client=None,
         model: str = "openrouter/qwen/qwen3-235b-a22b",
+        probe_model: str = "openrouter/qwen/qwen3-30b-a3b",
         random_mode: bool = False,
     ):
         self.client = client
         self.model = model
+        self.probe_model = probe_model
         self.random_mode = random_mode
 
     def probe(self, rec: Recommendation) -> ElenchusResult:
@@ -134,11 +155,7 @@ class ElenchusProbe:
         load_bearing = 0
 
         for i, component in enumerate(rec.reasoning_components):
-            # Step 1: Generate replacement
-            replacement = self._generate_replacement(component, rec)
-
-            # Step 2: Test if conclusion survives the swap
-            result = self._test_swap(rec, i, replacement)
+            result = self._probe_component(rec, i)
             probe_results.append(result)
 
             if not result.conclusion_survived:
@@ -154,6 +171,88 @@ class ElenchusProbe:
             total_components=total,
             load_bearing_count=load_bearing,
         )
+
+    def _probe_component(self, rec: Recommendation, component_index: int) -> ProbeResult:
+        """Probe a single component: generate replacement AND judge survival in one LLM call."""
+        original = rec.reasoning_components[component_index]
+
+        # Build component list for context
+        components_text = ""
+        for j, comp in enumerate(rec.reasoning_components):
+            marker = "  <<<< TESTING THIS COMPONENT" if j == component_index else ""
+            components_text += f"  {j+1}. {comp}{marker}\n"
+
+        context = (
+            f"Recommendation: {rec.ticker} {rec.direction} "
+            f"(conviction {rec.conviction:.2f})\n\n"
+            f"Reasoning components:\n{components_text}\n"
+            f"Conclusion: {rec.conclusion}\n\n"
+            f"Component being tested (#{component_index + 1}): {original}\n\n"
+            f"Generate a plausible OPPOSITE alternative for component #{component_index + 1}, "
+            f"then judge whether the original conclusion (same ticker, same direction) would "
+            f"still logically follow if that component were replaced with your alternative."
+        )
+
+        response = self._call_llm(
+            max_tokens=500,
+            messages=[
+                {"role": "system", "content": COMBINED_PROBE_SYSTEM_PROMPT},
+                {"role": "user", "content": context},
+            ],
+            model=self.probe_model,
+        )
+
+        try:
+            raw = response.content[0].text.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1]
+            if raw.endswith("```"):
+                raw = raw.rsplit("```", 1)[0]
+            data = json.loads(raw.strip())
+
+            # Defensive parsing — model may return a list instead of a dict
+            if isinstance(data, list):
+                data = data[0] if data and isinstance(data[0], dict) else {}
+            if not isinstance(data, dict):
+                raise ValueError(f"Unexpected JSON shape: {type(data).__name__}")
+
+            # Extract replacement
+            replacement_raw = data.get("replacement", original)
+            if isinstance(replacement_raw, str):
+                replacement = replacement_raw
+            elif isinstance(replacement_raw, list):
+                replacement = " ".join(str(r) for r in replacement_raw) if replacement_raw else original
+            else:
+                replacement = str(replacement_raw) if replacement_raw else original
+
+            # Extract conclusion_survives
+            conclusion_raw = data.get("conclusion_survives", True)
+            if isinstance(conclusion_raw, str):
+                conclusion_survived = conclusion_raw.lower().strip() in ("true", "yes", "1")
+            else:
+                conclusion_survived = bool(conclusion_raw)
+
+            # Extract reasoning
+            reasoning_raw = data.get("reasoning", data.get("explanation", ""))
+            probe_reasoning = str(reasoning_raw) if reasoning_raw else ""
+
+            return ProbeResult(
+                component_index=component_index,
+                original_component=original,
+                replacement_component=replacement,
+                conclusion_survived=conclusion_survived,
+                probe_reasoning=probe_reasoning,
+            )
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError,
+                AttributeError, ValueError):
+            # Any parse failure — conservative assumption: treat as decorative
+            return ProbeResult(
+                component_index=component_index,
+                original_component=original,
+                replacement_component=original,
+                conclusion_survived=True,
+                probe_reasoning="[PROBE PARSE FAILURE]",
+            )
 
     def _generate_replacement(self, component: str, rec: Recommendation) -> str:
         """Generate a plausible alternative for one reasoning component."""
@@ -279,19 +378,20 @@ class ElenchusProbe:
                 probe_reasoning="[PROBE PARSE FAILURE]",
             )
 
-    def _call_llm(self, max_tokens: int, messages: list[dict]) -> object:
+    def _call_llm(self, max_tokens: int, messages: list[dict], model: str | None = None) -> object:
         """Call LLM via client (testing) or litellm (production)."""
+        use_model = model or self.model
         if self.client is not None:
             # Test path — uses mock client with Anthropic-style interface
             return self.client.messages.create(
-                model=self.model,
+                model=use_model,
                 max_tokens=max_tokens,
                 timeout=180,
                 messages=messages,
             )
         # Production path — uses litellm via retry wrapper
         response = completion_with_retry(
-            model=self.model,
+            model=use_model,
             max_tokens=max_tokens,
             messages=messages,
         )
