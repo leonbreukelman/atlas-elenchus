@@ -123,22 +123,67 @@ class PaperLedger:
     def _init_db(self) -> None:
         """Create schema and seed meta if needed."""
         conn = self._conn()
-        conn.executescript(_SCHEMA)
-        # Initialize meta values if not present
-        existing = conn.execute("SELECT key FROM meta").fetchall()
-        existing_keys = {r["key"] for r in existing}
-        if "cash" not in existing_keys:
+        try:
+            # Individual execute() calls instead of executescript() which
+            # issues an implicit COMMIT before executing, breaking atomicity.
+            conn.execute("""CREATE TABLE IF NOT EXISTS portfolio (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL, direction TEXT NOT NULL,
+                shares REAL NOT NULL, entry_price REAL NOT NULL,
+                entry_date TEXT NOT NULL, current_value REAL NOT NULL,
+                source_agent TEXT NOT NULL, deutsch_score REAL
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL, run_type TEXT NOT NULL,
+                ticker TEXT NOT NULL, direction TEXT NOT NULL,
+                shares REAL NOT NULL, fill_price REAL NOT NULL,
+                commission REAL NOT NULL, reasoning TEXT
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS daily_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL, run_type TEXT NOT NULL,
+                date TEXT NOT NULL, total_value REAL NOT NULL,
+                cash REAL NOT NULL, positions_value REAL NOT NULL,
+                daily_return REAL NOT NULL, cumulative_return REAL NOT NULL
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS recommendations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL, run_type TEXT NOT NULL,
+                date TEXT NOT NULL, agent TEXT NOT NULL,
+                ticker TEXT NOT NULL, direction TEXT NOT NULL,
+                conviction REAL NOT NULL,
+                reasoning_components TEXT NOT NULL,
+                conclusion TEXT, deutsch_score REAL,
+                probed INTEGER NOT NULL DEFAULT 0,
+                filtered INTEGER NOT NULL DEFAULT 0
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS probe_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL, run_type TEXT NOT NULL,
+                date TEXT NOT NULL, agent TEXT NOT NULL,
+                ticker TEXT NOT NULL, component_index INTEGER NOT NULL,
+                component_text TEXT NOT NULL,
+                perturbation TEXT NOT NULL,
+                conclusion_survived INTEGER NOT NULL,
+                probe_reasoning TEXT
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )""")
+            # INSERT OR IGNORE: safe against concurrent writers due to PRIMARY KEY.
             conn.execute(
-                "INSERT INTO meta (key, value) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)",
                 ("cash", str(self._starting_capital)),
             )
-        if "cumulative_return" not in existing_keys:
             conn.execute(
-                "INSERT INTO meta (key, value) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)",
                 ("cumulative_return", "0.0"),
             )
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
     def _conn(self) -> sqlite3.Connection:
         """Return a connection with Row factory."""

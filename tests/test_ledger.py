@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -317,3 +319,33 @@ def test_idempotent_reinitialization(tmp_path: Path):
     assert len(positions2) == len(positions_after)
     assert positions2[0].ticker == positions_after[0].ticker
     assert positions2[0].shares == positions_after[0].shares
+
+
+def test_init_db_concurrent_no_duplicate_meta(tmp_path: Path):
+    """Concurrent _init_db calls must not create duplicate meta rows."""
+    db_path = tmp_path / "concurrent.db"
+    errors: list[Exception] = []
+
+    def init_ledger():
+        try:
+            PaperLedger(db_path=db_path, starting_capital=10000.0)
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=init_ledger) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"Errors during concurrent init: {errors}"
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT key, COUNT(*) as cnt FROM meta GROUP BY key"
+    ).fetchall()
+    conn.close()
+
+    for row in rows:
+        assert row["cnt"] == 1, f"Duplicate meta key: {row['key']} (count={row['cnt']})"
