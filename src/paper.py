@@ -122,11 +122,9 @@ class PaperTradingEngine:
         fill_prices = self.market.get_fill_prices(snapshot, run_type)
 
         # Execute rebalance
-        old_count = len(self.ledger.get_positions())
         trades = self.ledger.execute_rebalance(
             run_type, date_str, new_positions, fill_prices
         )
-        new_count = len(self.ledger.get_positions())
 
         # Read daily return from the snapshot the ledger just recorded
         conn = self.ledger._conn()
