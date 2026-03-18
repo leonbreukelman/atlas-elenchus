@@ -8,7 +8,10 @@
 
 set -euo pipefail
 
+export PATH="$HOME/.local/bin:$PATH"
+
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+export PYTHONPATH="$REPO_DIR"
 RUN_TYPE="${1:?Usage: cron_paper.sh <morning|evening>}"
 LOG_DIR="${REPO_DIR}/logs"
 DB_PATH="${REPO_DIR}/data/paper_ledger.db"
