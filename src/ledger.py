@@ -376,15 +376,15 @@ class PaperLedger:
                     "SELECT value FROM meta WHERE key = 'cumulative_return'"
                 ).fetchone()["value"]
             )
-            prev_total = cash + sum(
-                r["current_value"]
-                for r in conn.execute(
-                    "SELECT current_value FROM portfolio"
-                ).fetchall()
-            )
-
             # ── Step 1: Close existing positions ────────────────────────
             existing = conn.execute("SELECT * FROM portfolio").fetchall()
+
+            # Mark to market: value existing positions at current prices,
+            # not stale entry-time current_value.
+            prev_total = cash + sum(
+                row["shares"] * prices.get(row["ticker"], row["entry_price"])
+                for row in existing
+            )
             for row in existing:
                 ticker = row["ticker"]
                 direction = row["direction"]

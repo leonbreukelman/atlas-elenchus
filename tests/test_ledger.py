@@ -228,6 +228,60 @@ def test_record_recommendation_round_trip(ledger: PaperLedger):
     assert stored == components
 
 
+def test_daily_return_uses_current_market_prices(tmp_path: Path):
+    """prev_total must mark-to-market using current prices, not stale entry prices.
+
+    Day 1: Buy AAPL at $100. Day 2: AAPL now $110, rebalance into MSFT.
+    The AAPL appreciation should be captured in prev_total so daily_return
+    reflects only the rebalance cost, not the prior day's price movement.
+    """
+    ledger = PaperLedger(db_path=tmp_path / "mtm.db", starting_capital=10000.0)
+
+    # Day 1: buy AAPL at 100
+    ledger.execute_rebalance(
+        run_type="morning",
+        date="2026-03-17",
+        new_positions=[
+            LedgerPosition(
+                ticker="AAPL", direction="long", shares=0,
+                entry_price=100.0, entry_date="2026-03-17",
+                current_value=0.0, source_agent="atlas", deutsch_score=0.8,
+            ),
+        ],
+        prices={"AAPL": 100.0},
+    )
+
+    # Day 2: AAPL rose to 110, rebalance into MSFT at 200
+    ledger.execute_rebalance(
+        run_type="morning",
+        date="2026-03-18",
+        new_positions=[
+            LedgerPosition(
+                ticker="MSFT", direction="long", shares=0,
+                entry_price=200.0, entry_date="2026-03-18",
+                current_value=0.0, source_agent="atlas", deutsch_score=0.9,
+            ),
+        ],
+        prices={"AAPL": 110.0, "MSFT": 200.0},
+    )
+
+    # Check the day 2 snapshot
+    conn = ledger._conn()
+    snapshots = conn.execute(
+        "SELECT * FROM daily_snapshots ORDER BY id"
+    ).fetchall()
+    conn.close()
+
+    day2_snap = snapshots[1]
+    daily_ret = float(day2_snap["daily_return"])
+
+    # With stale prev_total (entry price $100), daily_return would be ~+0.08 to +0.10
+    # With correct mark-to-market ($110), daily_return should be small and negative
+    assert abs(daily_ret) < 0.02, (
+        f"daily_return={daily_ret:.4f} — prev_total likely using stale entry prices"
+    )
+
+
 def test_idempotent_reinitialization(tmp_path: Path):
     """Creating PaperLedger twice on same DB preserves existing state."""
     db_path = tmp_path / "idempotent.db"
