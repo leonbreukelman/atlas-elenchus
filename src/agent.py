@@ -57,7 +57,7 @@ class Agent:
         self,
         snapshot: MarketSnapshot,
         upstream_signals: list[Recommendation] | None = None,
-        model: str = "openrouter/qwen/qwen3-235b-a22b",
+        model: str = "openrouter/qwen/qwen3.5-plus-02-15",
     ) -> list[Recommendation]:
         """
         Produce recommendations for current market snapshot.

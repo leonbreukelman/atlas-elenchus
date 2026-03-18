@@ -27,17 +27,19 @@ class PaperTradingEngine:
         db_path: Path,
         prompt_dir: Path,
         starting_capital: float = 10000.0,
-        model: str = "openrouter/qwen/qwen3-235b-a22b",
-        probe_model: str | None = None,
+        model: str = "openrouter/qwen/qwen3.5-plus-02-15",
         probe_layers: list[int] | None = None,
+        probe_model: str | None = None,
+        vanilla: bool = False,
     ):
         self.ledger = PaperLedger(db_path=db_path, starting_capital=starting_capital)
         self.prompt_dir = prompt_dir
         self.model = model
+        self.vanilla = vanilla
         self.probe_layers = probe_layers or [1, 2, 3]
         self.pipeline = Pipeline(
             prompt_dir=prompt_dir,
-            use_elenchus=True,
+            use_elenchus=not vanilla,
             model=model,
             probe_model=probe_model,
             probe_layers=self.probe_layers,
@@ -194,7 +196,7 @@ class PaperTradingEngine:
 
             key = f"{rec.agent_id}:{rec.ticker}"
             er = elenchus_map.get(key)
-            deutsch = er.deutsch_score if er else 0.5
+            deutsch = er.deutsch_score if er else (1.0 if self.vanilla else 0.5)
 
             score = rec.conviction * agent.darwinian_weight * deutsch
             scored.append((score, rec, deutsch, agent.agent_id))

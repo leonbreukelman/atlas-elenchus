@@ -68,7 +68,7 @@ class AutoresearchLoop:
         self,
         repo_dir: Path,
         eval_window: int = 5,
-        model: str = "openrouter/qwen/qwen3-235b-a22b",
+        model: str = "openrouter/qwen/qwen3.5-plus-02-15",
     ):
         self.repo_dir = repo_dir
         self.eval_window = eval_window

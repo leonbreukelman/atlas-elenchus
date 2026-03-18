@@ -117,7 +117,7 @@ class ElenchusProbe:
     def __init__(
         self,
         client=None,
-        model: str = "openrouter/qwen/qwen3-235b-a22b",
+        model: str = "openrouter/qwen/qwen3.5-plus-02-15",
         probe_model: str | None = None,
         random_mode: bool = False,
     ):

@@ -25,7 +25,7 @@ def engine(tmp_path):
         db_path=tmp_path / "test.db",
         prompt_dir=prompt_dir,
         starting_capital=10000.0,
-        model="openrouter/qwen/qwen3-235b-a22b",
+        model="openrouter/qwen/qwen3.5-plus-02-15",
         probe_layers=[3],
     )
 

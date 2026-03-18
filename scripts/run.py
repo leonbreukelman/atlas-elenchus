@@ -94,7 +94,7 @@ def run_backtest(
     prompt_dir: Path,
     repo_dir: Path,
     mutation_interval: int = 20,
-    model: str = "openrouter/qwen/qwen3-235b-a22b",
+    model: str = "openrouter/qwen/qwen3.5-plus-02-15",
     output_dir: Path | None = None,
     probe_layers: list[int] | None = None,
 ) -> dict:
@@ -298,7 +298,7 @@ def main():
     parser.add_argument("--end", default=None)
     parser.add_argument("--mutation-interval", type=int, default=20,
                         help="Run autoresearch mutation every N trading days")
-    parser.add_argument("--model", default="openrouter/qwen/qwen3-235b-a22b")
+    parser.add_argument("--model", default="openrouter/qwen/qwen3.5-plus-02-15")
     parser.add_argument("--output-dir", default="results")
     parser.add_argument("--probe-layers", default="1,2,3",
                         help="Comma-separated layer numbers to probe with Elenchus (default: 1,2,3)")

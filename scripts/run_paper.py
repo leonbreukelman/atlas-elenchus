@@ -36,7 +36,7 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="openrouter/qwen/qwen3-235b-a22b",
+        default="openrouter/qwen/qwen3.5-plus-02-15",
         help="LLM model string",
     )
     parser.add_argument(
@@ -49,6 +49,11 @@ def main():
         type=float,
         default=10000.0,
         help="Starting capital (only used on first run)",
+    )
+    parser.add_argument(
+        "--vanilla",
+        action="store_true",
+        help="Run without Elenchus probing (vanilla mode for A/B comparison)",
     )
 
     args = parser.parse_args()
@@ -65,6 +70,7 @@ def main():
         starting_capital=args.capital,
         model=args.model,
         probe_layers=probe_layers,
+        vanilla=args.vanilla,
     )
 
     try:
