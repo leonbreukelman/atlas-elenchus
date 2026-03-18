@@ -34,7 +34,7 @@ class PaperTradingEngine:
         self.ledger = PaperLedger(db_path=db_path, starting_capital=starting_capital)
         self.prompt_dir = prompt_dir
         self.model = model
-        self.probe_layers = probe_layers or [3]
+        self.probe_layers = probe_layers or [1, 2, 3]
         self.pipeline = Pipeline(
             prompt_dir=prompt_dir,
             use_elenchus=True,

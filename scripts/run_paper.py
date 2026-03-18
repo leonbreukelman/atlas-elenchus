@@ -41,8 +41,8 @@ def main():
     )
     parser.add_argument(
         "--probe-layers",
-        default="3",
-        help="Comma-separated layer numbers to probe (default: 3)",
+        default="1,2,3",
+        help="Comma-separated layer numbers to probe (default: 1,2,3)",
     )
     parser.add_argument(
         "--capital",
