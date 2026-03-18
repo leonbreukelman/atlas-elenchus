@@ -44,7 +44,7 @@ class Pipeline:
         prompt_dir: Path,
         use_elenchus: bool = False, random_mode: bool = False,
         model: str = "openrouter/qwen/qwen3-235b-a22b",
-        probe_model: str = "openrouter/qwen/qwen3-30b-a3b",
+        probe_model: str | None = None,
         probe_layers: list[int] | None = None,
     ):
         self.use_elenchus = use_elenchus

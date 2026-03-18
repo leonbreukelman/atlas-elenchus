@@ -28,7 +28,7 @@ class PaperTradingEngine:
         prompt_dir: Path,
         starting_capital: float = 10000.0,
         model: str = "openrouter/qwen/qwen3-235b-a22b",
-        probe_model: str = "openrouter/qwen/qwen3-30b-a3b",
+        probe_model: str | None = None,
         probe_layers: list[int] | None = None,
     ):
         self.ledger = PaperLedger(db_path=db_path, starting_capital=starting_capital)
