@@ -118,7 +118,7 @@ class ElenchusProbe:
         self,
         client=None,
         model: str = "openrouter/qwen/qwen3-235b-a22b",
-        probe_model: str = "openrouter/qwen/qwen3-30b-a3b",
+        probe_model: str | None = None,
         random_mode: bool = False,
     ):
         self.client = client
