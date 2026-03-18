@@ -113,9 +113,13 @@ def test_ablation_logic(probe, real_recommendation):
     """
     # This test verifies our internal survives logic works when mocked
     probe.client.messages.create.return_value.content = [
-        MagicMock(text=json.dumps({"conclusion_survives": False, "explanation": "Critical component missing"}))
+        MagicMock(text=json.dumps({
+            "replacement": "Alternative reasoning",
+            "conclusion_survives": False,
+            "reasoning": "Critical component missing",
+        }))
     ]
-    
+
     # If the LLM judge says the conclusion doesn't survive the swap, it's load-bearing
-    res = probe._test_swap(real_recommendation, 0, "Replacement")
+    res = probe._probe_component(real_recommendation, 0)
     assert res.conclusion_survived is False

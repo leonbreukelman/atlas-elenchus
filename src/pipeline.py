@@ -98,24 +98,25 @@ class Pipeline:
 
             # Elenchus probe on this layer's output
             if self.probe and layer_recs and layer_num in self.probe_layers:
-                elenchus_results = self.probe.probe_batch(layer_recs)
+                # Pre-probe pruning: only probe recommendations that could enter the portfolio
+                def base_score(r):
+                    agent = self.agents.get(r.agent_id)
+                    return r.conviction * (agent.darwinian_weight if agent else 1.0)
+
+                layer_recs.sort(key=base_score, reverse=True)
+                recs_to_probe = layer_recs[:20]
+
+                elenchus_results = self.probe.probe_batch(recs_to_probe)
                 all_elenchus.extend(elenchus_results)
 
                 # Filter: only pass hard-to-vary recommendations upstream
-                hard_recs = []
+                hard_recs = [er.recommendation for er in elenchus_results if er.is_hard_to_vary]
                 for er in elenchus_results:
-                    if er.is_hard_to_vary:
-                        hard_recs.append(er.recommendation)
-                    else:
+                    if not er.is_hard_to_vary:
                         print(
                             f"  [{er.recommendation.agent_id}] {er.recommendation.ticker} "
                             f"FILTERED by Elenchus (deutsch={er.deutsch_score:.2f})"
                         )
-
-                # If Elenchus filtered everything, pass through the best one anyway
-                if not hard_recs and elenchus_results:
-                    best = max(elenchus_results, key=lambda x: x.deutsch_score)
-                    hard_recs = [best.recommendation]
 
                 layer_recs = hard_recs
 

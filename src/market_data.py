@@ -76,6 +76,7 @@ class MarketData:
                 self._prices[("Close", "VIX")] = vix["Close"]
         except Exception:
             pass
+        self._prices = self._prices.ffill()
 
     def _classify_regime(self, spy_returns_20d: float, spy_vol_20d: float) -> str:
         if spy_returns_20d > 0.02 and spy_vol_20d < 0.20:
@@ -135,6 +136,7 @@ class MarketData:
         except Exception:
             pass
 
+        data = data.ffill()
         self._live_data = data
 
         # Extract close prices
