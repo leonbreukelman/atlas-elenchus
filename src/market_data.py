@@ -7,7 +7,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Iterator
 
 
@@ -61,6 +61,8 @@ class MarketData:
         self.start = start
         self.end = end or datetime.now().strftime("%Y-%m-%d")
         self._prices: pd.DataFrame | None = None
+        self._live_data: pd.DataFrame | None = None
+        self._live_close: pd.DataFrame | None = None
 
     def fetch(self) -> None:
         """Download all data. Call once before iterating."""
@@ -112,3 +114,78 @@ class MarketData:
                 volatility_20d=volatility_20d,
                 spy_regime=regime,
             )
+
+    def snapshot_live(self, run_type: str = "evening") -> MarketSnapshot:
+        """Fetch a single live MarketSnapshot for the current day with trailing indicators."""
+        today = datetime.now()
+        end_str = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        start_str = (today - timedelta(days=45)).strftime("%Y-%m-%d")
+
+        # Download main tickers (exclude VIX — needs ^VIX)
+        tickers = [t for t in self.universe if t not in ("VIX", "^VIX")]
+        data = yf.download(tickers, start=start_str, end=end_str, progress=False)
+
+        # VIX via ^VIX (same pattern as fetch())
+        try:
+            vix = yf.download("^VIX", start=start_str, end=end_str, progress=False)
+            if not vix.empty:
+                data[("Close", "VIX")] = vix["Close"]
+                if "Open" in data.columns.get_level_values(0):
+                    data[("Open", "VIX")] = vix["Open"]
+        except Exception:
+            pass
+
+        self._live_data = data
+
+        # Extract close prices
+        if "Close" in data.columns.get_level_values(0):
+            close = data["Close"]
+        else:
+            close = data
+        self._live_close = close
+
+        n = len(close)
+
+        returns_1d = close.pct_change().iloc[-1]
+        returns_5d = (close.iloc[-1] / close.iloc[-5] - 1) if n >= 5 else returns_1d
+        returns_20d = (close.iloc[-1] / close.iloc[-20] - 1) if n >= 20 else returns_1d
+        volatility_20d = close.pct_change().iloc[-20:].std() * np.sqrt(252)
+
+        spy_ret = returns_20d.get("SPY", 0.0) if isinstance(returns_20d, pd.Series) else 0.0
+        spy_vol = volatility_20d.get("SPY", 0.15) if isinstance(volatility_20d, pd.Series) else 0.15
+        regime = self._classify_regime(spy_ret, spy_vol)
+
+        return MarketSnapshot(
+            date=close.index[-1],
+            prices=close,
+            returns_1d=returns_1d,
+            returns_5d=returns_5d,
+            returns_20d=returns_20d,
+            volatility_20d=volatility_20d,
+            spy_regime=regime,
+        )
+
+    def get_fill_prices(self, snapshot: MarketSnapshot, run_type: str) -> dict[str, float]:
+        """Extract fill prices from a live snapshot."""
+        if (
+            run_type == "morning"
+            and self._live_data is not None
+            and "Open" in self._live_data.columns.get_level_values(0)
+        ):
+            prices = self._live_data["Open"].iloc[-1]
+        else:
+            prices = snapshot.prices.iloc[-1]
+
+        return {
+            ticker: float(price)
+            for ticker, price in prices.items()
+            if pd.notna(price) and price > 0
+        }
+
+    def is_market_open_today(self) -> bool:
+        """Check if the market is open today by querying yfinance for SPY data."""
+        today = datetime.now()
+        today_str = today.strftime("%Y-%m-%d")
+        tomorrow = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        spy = yf.download("SPY", start=today_str, end=tomorrow, progress=False)
+        return not spy.empty
