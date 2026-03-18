@@ -282,6 +282,9 @@ class PaperLedger:
         probed: bool,
         filtered: bool,
     ) -> None:
+        # If conclusion is a dict (from JSON responses), serialize it
+        if isinstance(conclusion, dict):
+            conclusion = json.dumps(conclusion)
         conn.execute(
             """INSERT INTO recommendations
                (timestamp, run_type, date, agent, ticker, direction, conviction,
@@ -316,6 +319,13 @@ class PaperLedger:
         conclusion_survived: bool,
         probe_reasoning: str,
     ) -> None:
+        # If fields are dicts (from JSON responses), serialize them
+        if isinstance(probe_reasoning, dict):
+            probe_reasoning = json.dumps(probe_reasoning)
+        if isinstance(perturbation, dict):
+            perturbation = json.dumps(perturbation)
+        if isinstance(component_text, dict):
+            component_text = json.dumps(component_text)
         conn.execute(
             """INSERT INTO probe_results
                (timestamp, run_type, date, agent, ticker, component_index,
