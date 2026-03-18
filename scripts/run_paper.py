@@ -18,6 +18,9 @@ from dotenv import load_dotenv
 def main():
     load_dotenv()
 
+    import litellm
+    litellm.suppress_debug_info = True
+
     parser = argparse.ArgumentParser(description="Atlas-Elenchus Paper Trading")
     parser.add_argument(
         "--run-type",

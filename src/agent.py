@@ -4,6 +4,7 @@ Every recommendation includes structured reasoning — Elenchus probes this.
 """
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -132,8 +133,10 @@ class Agent:
 
     def _parse_response(self, raw: str, snapshot: MarketSnapshot) -> list[Recommendation]:
         try:
+            # Strip Qwen3 <think> tags before parsing
+            cleaned = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+
             # Strip markdown fences if present
-            cleaned = raw.strip()
             if cleaned.startswith("```"):
                 cleaned = cleaned.split("\n", 1)[1]
             if cleaned.endswith("```"):
@@ -145,14 +148,41 @@ class Agent:
             if isinstance(data, list):
                 items = data
             elif isinstance(data, dict):
-                items = data.get("recommendations", [])
+                # Fix 3: Handle singular "recommendation" key
+                if "recommendation" in data and "recommendations" not in data:
+                    if isinstance(data["recommendation"], dict):
+                        items = [data["recommendation"]]
+                    elif isinstance(data["recommendation"], str):
+                        # "recommendation": "avoid" pattern — build from top-level
+                        items = [data]
+                    else:
+                        items = []
+                else:
+                    items = data.get("recommendations", [])
+
+                # Fix 1: Flatten nested dicts (e.g. {"long": [...], "short": [...]})
+                if isinstance(items, dict):
+                    flat = []
+                    for key, val in items.items():
+                        if isinstance(val, list):
+                            for item in val:
+                                if isinstance(item, dict):
+                                    if "direction" not in item:
+                                        item["direction"] = key
+                                    flat.append(item)
+                        elif isinstance(val, dict):
+                            if "direction" not in val:
+                                val["direction"] = key
+                            flat.append(val)
+                    items = flat
             else:
                 return []
             recs = []
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                ticker = item.get("ticker")
+                # Fix 2: Accept "symbol" as alias for "ticker"
+                ticker = item.get("ticker") or item.get("symbol")
                 if not ticker:
                     continue
                 recs.append(Recommendation(
