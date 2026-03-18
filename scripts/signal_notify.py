@@ -3,6 +3,7 @@
 
 import json
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -32,6 +33,52 @@ def write_signal(status: str, days_completed: int = 0, total_days: int = 250,
     signal_file = SIGNAL_DIR / f"{signal_id}.json"
     signal_file.write_text(json.dumps(signal, indent=2))
     print(f"Signal written: {signal_file}")
+
+
+def write_paper_signal(
+    run_type: str,
+    date: str,
+    portfolio_value: float,
+    daily_return: float,
+    positions_changed: int,
+    avg_deutsch_score: float,
+    notable_events: list[str] | None = None,
+) -> None:
+    """Write a paper trading run signal."""
+    signal = {
+        "source": "atlas-elenchus",
+        "type": "paper_trading_run",
+        "run_type": run_type,
+        "date": date,
+        "portfolio_value": portfolio_value,
+        "daily_return": daily_return,
+        "positions_changed": positions_changed,
+        "avg_deutsch_score": avg_deutsch_score,
+        "notable_events": notable_events or [],
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    signal_id = str(uuid.uuid4())
+    path = SIGNAL_DIR / f"{signal_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(signal, indent=2))
+
+
+def write_paper_error(
+    run_type: str,
+    error: str,
+) -> None:
+    """Write a paper trading error signal."""
+    signal = {
+        "source": "atlas-elenchus",
+        "type": "paper_trading_error",
+        "run_type": run_type,
+        "error": error,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    signal_id = str(uuid.uuid4())
+    path = SIGNAL_DIR / f"{signal_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(signal, indent=2))
 
 
 if __name__ == "__main__":
