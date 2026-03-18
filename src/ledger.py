@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -13,7 +14,7 @@ class LedgerPosition:
 
     ticker: str
     direction: str  # "long" or "short"
-    shares: int
+    shares: float
     entry_price: float
     entry_date: str
     current_value: float
@@ -28,7 +29,7 @@ class LedgerTrade:
     timestamp: str
     ticker: str
     direction: str
-    shares: int
+    shares: float
     fill_price: float
     commission: float
     reasoning: str
@@ -36,9 +37,10 @@ class LedgerTrade:
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS portfolio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL,
     direction TEXT NOT NULL,
-    shares INTEGER NOT NULL,
+    shares REAL NOT NULL,
     entry_price REAL NOT NULL,
     entry_date TEXT NOT NULL,
     current_value REAL NOT NULL,
@@ -47,17 +49,19 @@ CREATE TABLE IF NOT EXISTS portfolio (
 );
 
 CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
     run_type TEXT NOT NULL,
     ticker TEXT NOT NULL,
     direction TEXT NOT NULL,
-    shares INTEGER NOT NULL,
+    shares REAL NOT NULL,
     fill_price REAL NOT NULL,
     commission REAL NOT NULL,
     reasoning TEXT
 );
 
 CREATE TABLE IF NOT EXISTS daily_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
     run_type TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -69,6 +73,7 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
 );
 
 CREATE TABLE IF NOT EXISTS recommendations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
     run_type TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -76,7 +81,7 @@ CREATE TABLE IF NOT EXISTS recommendations (
     ticker TEXT NOT NULL,
     direction TEXT NOT NULL,
     conviction REAL NOT NULL,
-    reasoning_components TEXT,
+    reasoning_components TEXT NOT NULL,
     conclusion TEXT,
     deutsch_score REAL,
     probed INTEGER NOT NULL DEFAULT 0,
@@ -84,6 +89,7 @@ CREATE TABLE IF NOT EXISTS recommendations (
 );
 
 CREATE TABLE IF NOT EXISTS probe_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
     run_type TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -110,7 +116,7 @@ class PaperLedger:
     SLIPPAGE_PCT: float = 0.001
 
     def __init__(self, db_path: Path, starting_capital: float = 10000.0) -> None:
-        self._db_path = db_path
+        self.db_path = db_path
         self._starting_capital = starting_capital
         self._init_db()
 
@@ -136,7 +142,7 @@ class PaperLedger:
 
     def _conn(self) -> sqlite3.Connection:
         """Return a connection with Row factory."""
-        conn = sqlite3.connect(str(self._db_path))
+        conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -144,20 +150,24 @@ class PaperLedger:
 
     def get_cash(self) -> float:
         conn = self._conn()
-        row = conn.execute("SELECT value FROM meta WHERE key = 'cash'").fetchone()
-        conn.close()
-        return float(row["value"])
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key = 'cash'").fetchone()
+            return float(row["value"])
+        finally:
+            conn.close()
 
     def _set_cash(self, conn: sqlite3.Connection, amount: float) -> None:
         conn.execute("UPDATE meta SET value = ? WHERE key = 'cash'", (str(amount),))
 
     def get_cumulative_return(self) -> float:
         conn = self._conn()
-        row = conn.execute(
-            "SELECT value FROM meta WHERE key = 'cumulative_return'"
-        ).fetchone()
-        conn.close()
-        return float(row["value"])
+        try:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key = 'cumulative_return'"
+            ).fetchone()
+            return float(row["value"])
+        finally:
+            conn.close()
 
     def _set_cumulative_return(self, conn: sqlite3.Connection, value: float) -> None:
         conn.execute(
@@ -168,21 +178,23 @@ class PaperLedger:
 
     def get_positions(self) -> list[LedgerPosition]:
         conn = self._conn()
-        rows = conn.execute("SELECT * FROM portfolio").fetchall()
-        conn.close()
-        return [
-            LedgerPosition(
-                ticker=r["ticker"],
-                direction=r["direction"],
-                shares=r["shares"],
-                entry_price=r["entry_price"],
-                entry_date=r["entry_date"],
-                current_value=r["current_value"],
-                source_agent=r["source_agent"],
-                deutsch_score=r["deutsch_score"],
-            )
-            for r in rows
-        ]
+        try:
+            rows = conn.execute("SELECT * FROM portfolio").fetchall()
+            return [
+                LedgerPosition(
+                    ticker=r["ticker"],
+                    direction=r["direction"],
+                    shares=r["shares"],
+                    entry_price=r["entry_price"],
+                    entry_date=r["entry_date"],
+                    current_value=r["current_value"],
+                    source_agent=r["source_agent"],
+                    deutsch_score=r["deutsch_score"],
+                )
+                for r in rows
+            ]
+        finally:
+            conn.close()
 
     def clear_positions(self, conn: sqlite3.Connection) -> None:
         conn.execute("DELETE FROM portfolio")
@@ -238,8 +250,6 @@ class PaperLedger:
         daily_return: float,
         cumulative_return: float,
     ) -> None:
-        from datetime import datetime, timezone
-
         conn.execute(
             """INSERT INTO daily_snapshots
                (timestamp, run_type, date, total_value, cash,
@@ -272,8 +282,6 @@ class PaperLedger:
         probed: bool,
         filtered: bool,
     ) -> None:
-        from datetime import datetime, timezone
-
         conn.execute(
             """INSERT INTO recommendations
                (timestamp, run_type, date, agent, ticker, direction, conviction,
@@ -308,8 +316,6 @@ class PaperLedger:
         conclusion_survived: bool,
         probe_reasoning: str,
     ) -> None:
-        from datetime import datetime, timezone
-
         conn.execute(
             """INSERT INTO probe_results
                (timestamp, run_type, date, agent, ticker, component_index,
@@ -344,144 +350,169 @@ class PaperLedger:
         2. Open new positions with equal weight
         3. Record trades and snapshot
         """
-        from datetime import datetime, timezone
-
         conn = self._conn()
-        trades: list[LedgerTrade] = []
-        now = datetime.now(timezone.utc).isoformat()
+        try:
+            trades: list[LedgerTrade] = []
+            now = datetime.now(timezone.utc).isoformat()
 
-        # Read current state
-        cash = float(
-            conn.execute("SELECT value FROM meta WHERE key = 'cash'").fetchone()["value"]
-        )
-        prev_cumulative = float(
-            conn.execute(
-                "SELECT value FROM meta WHERE key = 'cumulative_return'"
-            ).fetchone()["value"]
-        )
-        prev_total = cash + sum(
-            r["current_value"]
-            for r in conn.execute("SELECT current_value FROM portfolio").fetchall()
-        )
-
-        # ── Step 1: Close existing positions ────────────────────────
-        existing = conn.execute("SELECT * FROM portfolio").fetchall()
-        for row in existing:
-            ticker = row["ticker"]
-            direction = row["direction"]
-            shares = row["shares"]
-            price = prices.get(ticker, row["entry_price"])
-
-            if direction == "long":
-                # Sell: proceeds = shares * price * (1 - slippage) - commission
-                proceeds = shares * price * (1 - self.SLIPPAGE_PCT) - self.COMMISSION_PER_TRADE
-            else:
-                # Cover short: cost = shares * price * (1 + slippage) + commission
-                # Original short proceeds were shares * entry_price
-                # Net: entry_proceeds - cover_cost
-                entry_proceeds = shares * row["entry_price"]
-                cover_cost = shares * price * (1 + self.SLIPPAGE_PCT) + self.COMMISSION_PER_TRADE
-                proceeds = entry_proceeds - cover_cost
-
-            cash += proceeds
-            close_direction = "sell" if direction == "long" else "cover"
-            trade = LedgerTrade(
-                timestamp=now,
-                ticker=ticker,
-                direction=close_direction,
-                shares=shares,
-                fill_price=price,
-                commission=self.COMMISSION_PER_TRADE,
-                reasoning=f"Closing {direction} position in {ticker}",
+            # Read current state
+            cash = float(
+                conn.execute("SELECT value FROM meta WHERE key = 'cash'").fetchone()[
+                    "value"
+                ]
             )
-            trades.append(trade)
-            self.record_trade(conn, run_type, trade)
+            prev_cumulative = float(
+                conn.execute(
+                    "SELECT value FROM meta WHERE key = 'cumulative_return'"
+                ).fetchone()["value"]
+            )
+            prev_total = cash + sum(
+                r["current_value"]
+                for r in conn.execute(
+                    "SELECT current_value FROM portfolio"
+                ).fetchall()
+            )
 
-        # ── Step 2: Clear portfolio ─────────────────────────────────
-        self.clear_positions(conn)
+            # ── Step 1: Close existing positions ────────────────────────
+            existing = conn.execute("SELECT * FROM portfolio").fetchall()
+            for row in existing:
+                ticker = row["ticker"]
+                direction = row["direction"]
+                shares = row["shares"]
+                price = prices.get(ticker, row["entry_price"])
+                slippage_amount = shares * price * self.SLIPPAGE_PCT
 
-        # ── Step 3: Open new positions with equal weight ────────────
-        if new_positions and cash > 0:
-            n = len(new_positions)
-            allocation_per = cash / n
-
-            for pos in new_positions:
-                price = prices[pos.ticker]
-                # Effective price includes slippage
-                if pos.direction == "long":
-                    effective_price = price * (1 + self.SLIPPAGE_PCT)
+                if direction == "long":
+                    # Sell: proceeds = shares * price * (1 - slippage) - commission
+                    proceeds = (
+                        shares * price * (1 - self.SLIPPAGE_PCT)
+                        - self.COMMISSION_PER_TRADE
+                    )
                 else:
-                    effective_price = price * (1 - self.SLIPPAGE_PCT)
+                    # Cover short: cost = shares * price * (1 + slippage) + commission
+                    # Original short proceeds were shares * entry_price
+                    # Net: entry_proceeds - cover_cost
+                    entry_proceeds = shares * row["entry_price"]
+                    cover_cost = (
+                        shares * price * (1 + self.SLIPPAGE_PCT)
+                        + self.COMMISSION_PER_TRADE
+                    )
+                    proceeds = entry_proceeds - cover_cost
 
-                # Budget after commission
-                budget = allocation_per - self.COMMISSION_PER_TRADE
-                if budget <= 0:
-                    continue
-
-                shares = int(budget / effective_price)
-                if shares <= 0:
-                    continue
-
-                cost = shares * effective_price + self.COMMISSION_PER_TRADE
-                if cost > cash:
-                    # Reduce shares to fit
-                    shares = int((cash - self.COMMISSION_PER_TRADE) / effective_price)
-                    if shares <= 0:
-                        continue
-                    cost = shares * effective_price + self.COMMISSION_PER_TRADE
-
-                cash -= cost
-                current_value = shares * price
-
-                filled_pos = LedgerPosition(
-                    ticker=pos.ticker,
-                    direction=pos.direction,
-                    shares=shares,
-                    entry_price=price,
-                    entry_date=pos.entry_date,
-                    current_value=current_value,
-                    source_agent=pos.source_agent,
-                    deutsch_score=pos.deutsch_score,
-                )
-                self.add_position(conn, filled_pos)
-
-                buy_direction = "buy" if pos.direction == "long" else "short"
+                cash += proceeds
+                close_direction = "sell" if direction == "long" else "cover"
                 trade = LedgerTrade(
                     timestamp=now,
-                    ticker=pos.ticker,
-                    direction=buy_direction,
+                    ticker=ticker,
+                    direction=close_direction,
                     shares=shares,
                     fill_price=price,
-                    commission=self.COMMISSION_PER_TRADE,
-                    reasoning=f"Opening {pos.direction} position in {pos.ticker}",
+                    commission=self.COMMISSION_PER_TRADE + slippage_amount,
+                    reasoning=f"Closing {direction} position in {ticker}",
                 )
                 trades.append(trade)
                 self.record_trade(conn, run_type, trade)
 
-        # ── Step 4: Compute returns and snapshot ────────────────────
-        positions_value = sum(
-            r["current_value"]
-            for r in conn.execute("SELECT current_value FROM portfolio").fetchall()
-        )
-        total_value = cash + positions_value
+            # ── Step 2: Clear portfolio ─────────────────────────────────
+            self.clear_positions(conn)
 
-        if prev_total > 0:
-            daily_return = (total_value - prev_total) / prev_total
-        else:
-            daily_return = 0.0
+            # ── Step 3: Open new positions with equal weight ────────────
+            if new_positions and cash > 0:
+                n = len(new_positions)
+                allocation_per = cash / n
 
-        cumulative_return = (1 + prev_cumulative) * (1 + daily_return) - 1
+                for pos in new_positions:
+                    price = prices.get(pos.ticker)
+                    if price is None:
+                        continue
 
-        self.record_snapshot(
-            conn, run_type, date, total_value, cash, positions_value,
-            daily_return, cumulative_return,
-        )
+                    # Effective price includes slippage
+                    if pos.direction == "long":
+                        effective_price = price * (1 + self.SLIPPAGE_PCT)
+                    else:
+                        effective_price = price * (1 - self.SLIPPAGE_PCT)
 
-        # ── Step 5: Update meta ─────────────────────────────────────
-        self._set_cash(conn, cash)
-        self._set_cumulative_return(conn, cumulative_return)
+                    # Budget after commission
+                    budget = allocation_per - self.COMMISSION_PER_TRADE
+                    if budget <= 0:
+                        continue
 
-        conn.commit()
-        conn.close()
+                    shares = budget / effective_price
+                    if shares <= 0:
+                        continue
 
-        return trades
+                    cost = shares * effective_price + self.COMMISSION_PER_TRADE
+                    if cost > cash:
+                        # Reduce shares to fit
+                        shares = (
+                            cash - self.COMMISSION_PER_TRADE
+                        ) / effective_price
+                        if shares <= 0:
+                            continue
+                        cost = shares * effective_price + self.COMMISSION_PER_TRADE
+
+                    cash -= cost
+                    current_value = shares * price
+                    slippage_amount = shares * price * self.SLIPPAGE_PCT
+
+                    filled_pos = LedgerPosition(
+                        ticker=pos.ticker,
+                        direction=pos.direction,
+                        shares=shares,
+                        entry_price=price,
+                        entry_date=pos.entry_date,
+                        current_value=current_value,
+                        source_agent=pos.source_agent,
+                        deutsch_score=pos.deutsch_score,
+                    )
+                    self.add_position(conn, filled_pos)
+
+                    buy_direction = "buy" if pos.direction == "long" else "short"
+                    trade = LedgerTrade(
+                        timestamp=now,
+                        ticker=pos.ticker,
+                        direction=buy_direction,
+                        shares=shares,
+                        fill_price=price,
+                        commission=self.COMMISSION_PER_TRADE + slippage_amount,
+                        reasoning=f"Opening {pos.direction} position in {pos.ticker}",
+                    )
+                    trades.append(trade)
+                    self.record_trade(conn, run_type, trade)
+
+            # ── Step 4: Compute returns and snapshot ────────────────────
+            positions_value = sum(
+                r["current_value"]
+                for r in conn.execute(
+                    "SELECT current_value FROM portfolio"
+                ).fetchall()
+            )
+            total_value = cash + positions_value
+
+            if prev_total > 0:
+                daily_return = (total_value - prev_total) / prev_total
+            else:
+                daily_return = 0.0
+
+            cumulative_return = (1 + prev_cumulative) * (1 + daily_return) - 1
+
+            self.record_snapshot(
+                conn,
+                run_type,
+                date,
+                total_value,
+                cash,
+                positions_value,
+                daily_return,
+                cumulative_return,
+            )
+
+            # ── Step 5: Update meta ─────────────────────────────────────
+            self._set_cash(conn, cash)
+            self._set_cumulative_return(conn, cumulative_return)
+
+            conn.commit()
+
+            return trades
+        finally:
+            conn.close()

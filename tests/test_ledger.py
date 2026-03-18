@@ -1,6 +1,7 @@
 """Tests for the SQLite paper trading ledger."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -15,20 +16,23 @@ def ledger(tmp_path: Path) -> PaperLedger:
 
 
 def test_ledger_creates_tables(ledger: PaperLedger):
-    """Verify all 6 tables exist after init, alphabetically sorted."""
+    """Verify all 6 application tables exist after init."""
     conn = ledger._conn()
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
     ).fetchall()
     table_names = [r["name"] for r in rows]
-    assert table_names == [
+    # sqlite_sequence is auto-created by AUTOINCREMENT columns
+    expected = [
         "daily_snapshots",
         "meta",
         "portfolio",
         "probe_results",
         "recommendations",
+        "sqlite_sequence",
         "trades",
     ]
+    assert table_names == expected
 
 
 def test_ledger_initial_cash(ledger: PaperLedger):
@@ -186,3 +190,76 @@ def test_rebalance_enforces_cash(ledger: PaperLedger):
 
     cash = ledger.get_cash()
     assert cash >= 0.0
+
+
+def test_record_recommendation_round_trip(ledger: PaperLedger):
+    """Record a recommendation and verify reasoning_components JSON round-trips."""
+    components = ["Strong momentum", "Positive earnings surprise", "Sector rotation"]
+    conn = ledger._conn()
+    ledger.record_recommendation(
+        conn,
+        run_type="backtest",
+        date="2026-03-17",
+        agent="atlas",
+        ticker="AAPL",
+        direction="long",
+        conviction=0.85,
+        reasoning_components=components,
+        conclusion="Buy with high conviction",
+        deutsch_score=0.9,
+        probed=True,
+        filtered=False,
+    )
+    conn.commit()
+
+    row = conn.execute("SELECT * FROM recommendations").fetchone()
+    conn.close()
+
+    assert row["agent"] == "atlas"
+    assert row["ticker"] == "AAPL"
+    assert row["conviction"] == 0.85
+    assert row["probed"] == 1
+    assert row["filtered"] == 0
+    assert row["deutsch_score"] == 0.9
+    assert row["conclusion"] == "Buy with high conviction"
+
+    # Verify JSON round-trip of reasoning_components
+    stored = json.loads(row["reasoning_components"])
+    assert stored == components
+
+
+def test_idempotent_reinitialization(tmp_path: Path):
+    """Creating PaperLedger twice on same DB preserves existing state."""
+    db_path = tmp_path / "idempotent.db"
+
+    # First init — run a rebalance to create state
+    ledger1 = PaperLedger(db_path=db_path)
+    ledger1.execute_rebalance(
+        run_type="backtest",
+        date="2026-03-17",
+        new_positions=[
+            LedgerPosition(
+                ticker="AAPL",
+                direction="long",
+                shares=0,
+                entry_price=150.0,
+                entry_date="2026-03-17",
+                current_value=0.0,
+                source_agent="atlas",
+                deutsch_score=0.8,
+            ),
+        ],
+        prices={"AAPL": 150.0},
+    )
+    cash_after = ledger1.get_cash()
+    positions_after = ledger1.get_positions()
+
+    # Second init on same DB
+    ledger2 = PaperLedger(db_path=db_path)
+
+    # State must be preserved
+    assert ledger2.get_cash() == cash_after
+    positions2 = ledger2.get_positions()
+    assert len(positions2) == len(positions_after)
+    assert positions2[0].ticker == positions_after[0].ticker
+    assert positions2[0].shares == positions_after[0].shares
