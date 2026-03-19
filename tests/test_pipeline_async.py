@@ -1,13 +1,14 @@
 """Tests for async agent recommendation calls."""
 import asyncio
 import inspect
+import time
 from unittest.mock import MagicMock, AsyncMock, patch
-from pathlib import Path
 
 import pytest
 
 from src.agent import Agent, Recommendation
 from src.market_data import MarketSnapshot
+from src.pipeline import Pipeline
 
 
 @pytest.fixture
@@ -67,3 +68,55 @@ def test_sync_recommend_still_works(agent, mock_snapshot):
 
     assert len(recs) == 1
     assert recs[0].ticker == "MSFT"
+
+
+@pytest.fixture
+def pipeline(tmp_path):
+    """Pipeline with minimal prompt files."""
+    prompt_dir = tmp_path / "prompts"
+    prompt_dir.mkdir()
+    for name in [
+        "macro_regime", "rates_yield", "volatility",
+        "tech_semi", "energy", "quality",
+        "risk_officer", "cio",
+    ]:
+        (prompt_dir / f"{name}.md").write_text(
+            f"You are the {name} agent. Produce JSON recommendations."
+        )
+    return Pipeline(prompt_dir=prompt_dir, use_elenchus=False)
+
+
+def test_layer_agents_run_concurrently(pipeline, mock_snapshot):
+    """Agents within a layer must run concurrently, not sequentially."""
+
+    async def slow_arecommend(self, snapshot, upstream_signals=None, model=None):
+        await asyncio.sleep(0.1)
+        return []
+
+    with patch.object(Agent, "arecommend", slow_arecommend):
+        start = time.monotonic()
+        pipeline.run_day(mock_snapshot)
+        elapsed = time.monotonic() - start
+
+    # 3 layers with 3, 3, 2 agents. Sequential: 8 * 0.1s = 0.8s
+    # Concurrent within layer: ~0.1s per layer * 3 layers = ~0.3s
+    assert elapsed < 0.6, f"Took {elapsed:.2f}s — agents likely running sequentially"
+
+
+def test_agent_failure_isolated(pipeline, mock_snapshot):
+    """One agent failing must not prevent others from returning recs."""
+
+    async def maybe_fail(self, snapshot, upstream_signals=None, model=None):
+        if self.agent_id == "macro_regime":
+            raise RuntimeError("Simulated failure")
+        return [Recommendation(
+            agent_id=self.agent_id, date="2026-03-17", ticker="AAPL",
+            direction="long", conviction=0.8,
+            reasoning_components=["test"], conclusion="buy",
+        )]
+
+    with patch.object(Agent, "arecommend", maybe_fail):
+        recs, _ = pipeline.run_day(mock_snapshot)
+
+    # macro_regime failed but 7 other agents should produce recs
+    assert len(recs) >= 2

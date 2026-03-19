@@ -10,6 +10,7 @@ Each layer feeds into the next. Elenchus probes every recommendation
 before it passes upstream.
 """
 
+import asyncio
 from pathlib import Path
 
 from .agent import Agent, Recommendation
@@ -81,20 +82,8 @@ class Pipeline:
 
         for layer_num in sorted(self.layers.keys()):
             layer_agents = self.layers[layer_num]
-            layer_recs: list[Recommendation] = []
-
-            for agent in layer_agents:
-                try:
-                    recs = agent.recommend(
-                        snapshot=snapshot,
-                        upstream_signals=upstream if upstream else None,
-                        model=self.model,
-                    )
-                    layer_recs.extend(recs)
-                except Exception as e:
-                    # Agent failure — log and continue
-                    print(f"  [{agent.agent_id}] FAILED: {e}")
-                    continue
+            # Fire all agents in this layer concurrently
+            layer_recs = self._run_layer_agents(layer_agents, snapshot, upstream)
 
             # Elenchus probe on this layer's output
             if self.probe and layer_recs and layer_num in self.probe_layers:
@@ -124,6 +113,38 @@ class Pipeline:
             upstream = layer_recs  # feed to next layer
 
         return all_recommendations, all_elenchus
+
+    def _run_layer_agents(
+        self,
+        agents: list[Agent],
+        snapshot: MarketSnapshot,
+        upstream: list[Recommendation],
+    ) -> list[Recommendation]:
+        """Run all agents in a layer concurrently via asyncio.gather."""
+
+        async def _gather():
+            return await asyncio.gather(
+                *(
+                    agent.arecommend(
+                        snapshot=snapshot,
+                        upstream_signals=upstream if upstream else None,
+                        model=self.model,
+                    )
+                    for agent in agents
+                ),
+                return_exceptions=True,
+            )
+
+        results = asyncio.run(_gather())
+
+        layer_recs: list[Recommendation] = []
+        for agent, result in zip(agents, results):
+            if isinstance(result, Exception):
+                print(f"  [{agent.agent_id}] FAILED: {result}")
+                continue
+            layer_recs.extend(result)
+
+        return layer_recs
 
     def worst_agent(self) -> Agent:
         """Find the agent with lowest rolling Sharpe — target for autoresearch mutation."""
