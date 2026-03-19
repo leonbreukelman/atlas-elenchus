@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .llm import completion_with_retry
+from .llm import completion_with_retry, acompletion_with_retry
 from .market_data import MarketSnapshot
 
 
@@ -83,6 +83,28 @@ class Agent:
         context = self._build_context(snapshot, upstream_signals)
 
         response = completion_with_retry(
+            model=model,
+            max_tokens=2000,
+            timeout=180,
+            messages=[
+                {"role": "system", "content": self.prompt},
+                {"role": "user", "content": context},
+            ],
+        )
+
+        raw = response.choices[0].message.content
+        return self._parse_response(raw, snapshot)
+
+    async def arecommend(
+        self,
+        snapshot: MarketSnapshot,
+        upstream_signals: list[Recommendation] | None = None,
+        model: str = "openrouter/qwen/qwen3.5-plus-02-15",
+    ) -> list[Recommendation]:
+        """Async version of recommend(). Same contract, uses acompletion_with_retry."""
+        context = self._build_context(snapshot, upstream_signals)
+
+        response = await acompletion_with_retry(
             model=model,
             max_tokens=2000,
             timeout=180,
